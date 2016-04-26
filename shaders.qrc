@@ -1,0 +1,10 @@
+<RCC>
+    <qresource prefix="/">
+        <file>shaders/vshader.glsl</file>
+        <file>shaders/fshader.glsl</file>
+        <file>shaders/vpoints.glsl</file>
+        <file>shaders/fpoints.glsl</file>
+        <file>shaders/scan_fragShader.glsl</file>
+        <file>shaders/scan_vertShader.glsl</file>
+    </qresource>
+</RCC>
