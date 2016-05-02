@@ -13,6 +13,5 @@ DEPENDPATH = ./
 HEADERS += *.h
 SOURCES += *.cpp
 CONFIG += c++11
-#QMAKE_LFLAGS += -Wl,--large-address-aware
 DISTFILES +=
 

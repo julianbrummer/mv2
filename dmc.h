@@ -352,6 +352,15 @@ const Index edge_origin[12] = {
     Index(0,0,0), Index(1,0,0), Index(1,0,1), Index(0,0,1)
 };
 
+namespace Color {
+    const Vector3f WHITE = Vector3f(1,1,1);
+    const Vector3f GRAY = Vector3f(0.5,0.5,0.5);
+    const Vector3f BLUE = Vector3f(0,0,1);
+    const Vector3f YELLOW = Vector3f(1,1,0);
+    const Vector3f GREEN = Vector3f(0,1,0);
+    const Vector3f RED = Vector3f(1,0,0);
+}
+
 
 enum SolutionSpace {
     POINT_SPACE = 3,
@@ -385,9 +394,14 @@ public:
     Vector3f v;
     QEF qef;
     int8_t surfaceIndex;
-    VertexNode() : surfaceIndex(-1) {v.setZero(3);}
-    bool operator <(const VertexNode& other) const;
+    int vertexIndex;
+    float error;
+    bool collapsable;
+    VertexNode() : surfaceIndex(-1), vertexIndex(-1), error(0.0), collapsable(false) {v.setZero(3);}
+    void computeError();
 };
+
+bool compareSurfaceIndex(shared_ptr<VertexNode> v1, shared_ptr<VertexNode> v2);
 
 enum DMCNodeType {
     INTERNAL,
@@ -427,41 +441,45 @@ public:
     VertexNode* vertexAssignedTo(uint edgeIndex) const override {return vertices[edgeVertices[edgeIndex]].get();}
 };
 
-class IMeshBuilder {
+class DMCOctreeAction {
 public:
     virtual void handle(const DMCOctreeCell* node, const Index& index) = 0;
 };
 
-class DefaultMeshBuilder : public IMeshBuilder {
+class MeshBuilder : public DMCOctreeAction {
 protected:
-    float cellGridRadius;
-    Vector3f origin;
     aligned_vector3f& positions;
     vector_4_uint& offset;
 
 public:
-    DefaultMeshBuilder(float cellGridRadius, const Vector3f& origin,
-                       aligned_vector3f& positions, vector_4_uint& offset) :
-        cellGridRadius(cellGridRadius), origin(origin), positions(positions), offset(offset) {}
+    MeshBuilder(aligned_vector3f& positions, vector_4_uint& offset) :
+        positions(positions), offset(offset) {}
 };
 
-class DMCVerticesBuilder : public DefaultMeshBuilder {
+class DMCVerticesBuilder : public MeshBuilder {
+    aligned_vector3f& colors;
     vector_4_uint& count;
 
 public:
-    DMCVerticesBuilder(float cellGridRadius, const Vector3f& origin,
-                       aligned_vector3f& positions, vector_4_uint& offset, vector_4_uint& count)
-        : DefaultMeshBuilder(cellGridRadius, origin, positions, offset), count(count) {}
+    DMCVerticesBuilder(aligned_vector3f& positions, aligned_vector3f& colors,
+                       vector_4_uint& offset, vector_4_uint& count)
+        : MeshBuilder(positions, offset), colors(colors), count(count) {}
 
     void handle(const DMCOctreeCell* node, const Index& index) override;
 };
 
-class DMCCellBuilder : public DefaultMeshBuilder {
+class DMCCellBuilder : public MeshBuilder {
     uint res;
 public:
-    DMCCellBuilder(uint res, float cellGridRadius, const Vector3f& origin,
-                       aligned_vector3f& positions, vector_4_uint& offset)
-        : DefaultMeshBuilder(cellGridRadius, origin, positions, offset), res(res) {}
+    DMCCellBuilder(uint res, aligned_vector3f& positions, vector_4_uint& offset)
+        : MeshBuilder(positions, offset), res(res) {}
+    void handle(const DMCOctreeCell* node, const Index& index) override;
+};
+
+class DMCCollapseUpdater : public DMCOctreeAction {
+    float max_error;
+public:
+    DMCCollapseUpdater(float max_error) : max_error(max_error) {}
     void handle(const DMCOctreeCell* node, const Index& index) override;
 };
 
@@ -469,32 +487,48 @@ class DualMarchingCubes {
 private:
     HermiteDataSampler* sampler;
     unique_ptr<DMCOctreeNode> root;
-
+// init octree
     bool inCell(Vector3d& pos, const Vector3d& cellOrigin, const double size) const;
     void initQEF(const int edges[], uint count, const Index& cell_index, QEF& qef) const;
+    void generateVertex(const Index &cell_index, uint8_t level, QEF& qef, Vector3f& v);
     void createVertexNodes(DMCOctreeLeaf &leaf, const Index& leaf_index);
     void createOctreeNodes(DMCOctreeNode& parent, unsigned int parent_size, const Index &parent_index);
-
-
+// init vertexTree
     void assignSurface(const vector<shared_ptr<VertexNode>> &vertices, int from, int to) const;
     void clusterEdge(array<DMCOctreeCell*, 4> nodes, uint orientation,
                      uint& maxSurfaceIndex, const vector<shared_ptr<VertexNode> > &vertices);
     void clusterFace(array<DMCOctreeCell*, 2> nodes, uint orientation,
                      uint& maxSurfaceIndex, const vector<shared_ptr<VertexNode> > &vertices);
     void clusterCell(const Index &cell_index, DMCOctreeCell* node);
-    void generateVertex(const Index &cell_index, uint8_t level, QEF& qef, Vector3f& v);
 
-    void bfs(IMeshBuilder& builder, bool processEmptyNodes) const;
+    void updateCollapsableFlag(const DMCOctreeCell *node, float max_error);
+// build mesh
+    vector<VertexNode*> makeUnique(const array<VertexNode*, 4> v);
+    void triangle(const vector<VertexNode*> v, initializer_list<int> index_order,
+                  aligned_vector3f& positions, vector<uint>& indices);
+    bool checkNormal(const vector<VertexNode*> v, initializer_list<int> normal_order, const Vector3f& dir);
+    void triangulate(const vector<VertexNode*> v, bool front_face, const uint orientation,
+                     aligned_vector3f& positions, vector<uint>& indices);
+    void edgeProc(array<DMCOctreeCell* , 4> nodes, uint orientation,
+                  aligned_vector3f& positions, vector<uint>& indices);
+    void faceProc(array<DMCOctreeCell*, 2> nodes, uint orientation,
+                  aligned_vector3f& positions, vector<uint>& indices);
+    void cellProc(const DMCOctreeCell *node, aligned_vector3f& positions, vector<uint>& indices);
+
+    void bfs(DMCOctreeAction& action, bool processEmptyNodes) const;
+    void dfs(DMCOctreeAction& action, bool processEmptyNodes) const;
     void initVector(vector_4_uint& v) const;
+
 public:
     float truncation;
     DualMarchingCubes(HermiteDataSampler& sampler) : sampler(&sampler), truncation(0.1f) {}
     void createOctree();
     void createVertexTree();
-    void vertices(float voxelGridRadius, aligned_vector3f& positions,
+    void collapse(float max_error);
+    void createMesh(aligned_vector3f& positions, vector<uint>& indices);
+    void vertices(aligned_vector3f& positions, aligned_vector3f &colors,
                   vector_4_uint& offset, vector_4_uint &count) const;
-    void cells(float voxelGridRadius, aligned_vector3f &positions,
-                  vector_4_uint& offset) const;
+    void cells(aligned_vector3f &positions, vector_4_uint& offset) const;
 };
 
 #endif // DMC_H

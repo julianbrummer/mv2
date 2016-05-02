@@ -48,6 +48,7 @@ public slots:
     void toggleViewInGridPoints() {showInGridPoints = !showInGridPoints; updateGL();}
     void toggleViewOutGridPoints() {showOutGridPoints = !showOutGridPoints; updateGL();}
     void toggleViewDMCVertices() {showDMCVertices = !showDMCVertices; updateGL();}
+    void toggleViewDMCModel() {showDMCModel = !showDMCModel; updateGL();}
     void toggleViewCells() {showCells = !showCells; updateGL();}
     void toggleViewCellLevel() {showSingleCell = !showSingleCell; updateGL();}
     void increaseSelectedLevel() {
@@ -87,26 +88,18 @@ public:
     void trackballCoord(int x, int y, Vector3f& v);
     Quaternionf trackball(const Vector3f& u, const Vector3f& v);
 
-/*
-    void snapshotDualConturing(bool front_faces);
-    void snapshot(QGLShaderProgram &program);
-
-    void createAll();
-    void copyEdgeData(std::vector<std::vector<GLuint> > &edgeData);
-    void copyGridData(std::vector<bool>& gridData);
-*/
     static const int CELL_EDGES_VERTEX_COUNT = 24;
     static const float CAMERA_MOVEMENT_SPEED;
     static const float CAMERA_SCROLL_FACTOR;
-    unique_ptr<Model> model, edgeIntersections, inGridPoints, outGridPoints, dmcVertices, cells;
+    unique_ptr<Model> model, edgeIntersections, inGridPoints, outGridPoints, dmcVertices, dmcModel, cells;
     Camera camera;
 
     Vector3f origin;
 
     //bool wireframe;
-    bool showModel, showEdgeIntesections, showInGridPoints, showOutGridPoints, showDMCVertices, showCells, showSingleCell;
+    bool showModel, showEdgeIntesections, showInGridPoints, showOutGridPoints,
+         showDMCModel, showDMCVertices, showCells, showSingleCell;
 
-    //bool showEdgeCuts, showCells, showGrid, showDCVertices, showDCMesh, showAxis;
     uint res;
     int levels;
 
@@ -130,6 +123,8 @@ protected:
     int oldX,oldY,button;
 
 private:
+    void bindModel(Model* model, const Matrix4f& V, QVector4D color);
+    void renderModel(Model* model, const Matrix4f &V, QVector4D color);
     void bindDebugMesh(Model* model, const Matrix4f &V, bool useVertexColor = false, QVector4D color = QVector4D(1,1,1,1));
     void renderDebugMesh(Model* model, const Matrix4f &V, bool useVertexColor = false, QVector4D color = QVector4D(1,1,1,1));
 

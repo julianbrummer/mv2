@@ -83,11 +83,19 @@ Index Index::shiftZ(int shift) const {
 }
 
 bool OctreeNode::sign(uint i) {
-    return signConfig & (1 << i);
+    return (signConfig & (1 << i)) > 0;
 }
 
 bool OctreeNode::signChange(uint e) {
     return sign(edge_corners[e][0]) != sign(edge_corners[e][1]);
+}
+
+bool OctreeNode::frontface(uint e) {
+    return !sign(edge_corners[e][0]) && sign(edge_corners[e][1]);
+}
+
+bool OctreeNode::backface(uint e) {
+    return sign(edge_corners[e][0]) && !sign(edge_corners[e][1]);
 }
 
 const uint Sampler::MIN_RESOULTION = 2;

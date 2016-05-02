@@ -52,7 +52,7 @@ const uint edge_corners[12][2] = {
 };
 
 // power_of_2
-const double pow2Table[12] = {
+const uint pow2Table[12] = {
     1,2,4,8,16,32,64,128,256,512,1024,2048
 };
 
@@ -128,6 +128,8 @@ public:
     OctreeNode(uint8_t level) : level(level), signConfig(0) {}
     bool sign(uint i);
     bool signChange(uint e);
+    bool frontface(uint e);
+    bool backface(uint e);
 };
 
 class Sampler {

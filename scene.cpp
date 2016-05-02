@@ -70,6 +70,29 @@ SceneObject& SceneObject::setRotation(float angle, const Vector3f& axis) {
     return *this;
 }
 
+Model::Model(const aligned_vector3f &positions, const vector<uint> &triangles, bool centerAndScale, float size)
+        : SceneObject(), mode(GL_TRIANGLES) {
+    aligned_vectorPosNormal posAndNormals;
+    for (uint i = 0; i < triangles.size(); i+=3) {
+        const Vector3f& v0 = positions[triangles[i]];
+        const Vector3f& v1 = positions[triangles[i+1]];
+        const Vector3f& v2 = positions[triangles[i+2]];
+        Vector3f n = (v1-v0).cross(v2-v0);
+        n.normalize();
+        posAndNormals.push_back(PositionNormal(v0, n));
+        posAndNormals.push_back(PositionNormal(v1, n));
+        posAndNormals.push_back(PositionNormal(v2, n));
+    }
+    VBOInfo posNormal(0,sizeof(Vector3f));
+    vbo = shared_ptr<VBO>(new VBO(posAndNormals, posNormal));
+    if (centerAndScale)
+        init(positions, size);
+    else {
+        center.setZero(3);
+        scale = 1.0;
+    }
+}
+
 Model::Model(const aligned_vector3f &positions, const aligned_vector3f &normals, int mode, bool centerAndScale, float size) : SceneObject(), mode(mode) {
     aligned_vectorPosNormal posAndNormals;
     for (uint i = 0; i < positions.size(); ++i) {

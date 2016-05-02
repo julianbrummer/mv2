@@ -35,6 +35,8 @@ class Model : public SceneObject {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     Model(const aligned_vector3f& positions,
+          const vector<uint>& triangles, bool centerAndScale = true, float size = 1.0f);
+    Model(const aligned_vector3f& positions,
           const aligned_vector3f& normals,
           int mode = GL_TRIANGLES, bool centerAndScale = true, float size = 1.0f);
     Model(const aligned_vector3f& positions,

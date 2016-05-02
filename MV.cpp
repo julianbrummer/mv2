@@ -41,7 +41,8 @@ CGMainWindow::CGMainWindow (QWidget* parent)
     view->addAction ("Edge Intersections", ogl, SLOT(toggleViewEdgeIntersections()), Qt::Key_E);
     view->addAction ("Inner Grid", ogl, SLOT(toggleViewInGridPoints()), Qt::Key_I);
     view->addAction ("Outer Grid", ogl, SLOT(toggleViewOutGridPoints()), Qt::Key_O);
-    view->addAction ("Vertices", ogl, SLOT(toggleViewDMCVertices()), Qt::Key_V);
+    view->addAction ("Vertices", ogl, SLOT(toggleViewDMCVertices()), Qt::Key_V);   
+    view->addAction ("DMC Mesh", ogl, SLOT(toggleViewDMCModel()), Qt::Key_D);
     view->addAction ("Cells", ogl, SLOT(toggleViewCells()), Qt::Key_C);
     view->addAction ("Toggle Level/Cell", ogl, SLOT(toggleViewCellLevel()), Qt::Key_L);
     view->addAction ("Higher Level", ogl, SLOT(decreaseSelectedLevel()), Qt::Key_Plus);
@@ -59,9 +60,9 @@ CGMainWindow::CGMainWindow (QWidget* parent)
     layout->addWidget(ogl);
     layout->setMargin(0);
     f->setLayout(layout);
-
     setCentralWidget(f);
 
+    ogl->setFocusPolicy(Qt::StrongFocus); // for keyboard events
     statusBar()->showMessage("Ready",1000);
 }
 
@@ -349,7 +350,7 @@ void MyGLWidget::initializeGL() {
     rotX = rotY = 0;
     zoom = 1.0f;
 
-    res = 64;
+    res = 128;
     levels = i_log2(res)+1;
     voxelGridRadius = 1.0f;
     cellGridRadius = voxelGridRadius-voxelGridRadius/(res+1);
@@ -360,6 +361,7 @@ void MyGLWidget::initializeGL() {
     //main->loadTrack();
     main->loadModel();
     showModel = false;
+    showDMCModel = false;
     showEdgeIntesections = false;
     showInGridPoints = false;
     showOutGridPoints = false;
@@ -367,6 +369,20 @@ void MyGLWidget::initializeGL() {
     showCells = false;
     showSingleCell = false;
     selectedLevel = 0;
+}
+
+void MyGLWidget::bindModel(Model* model, const Matrix4f& V, QVector4D color) {
+    program.bind();
+    Matrix4f VM = V * model->getModelMatrix();
+    Matrix4f PVM = camera.projection * VM;
+    program.setUniformValue("uMVPMat",qMat(PVM));
+    program.setUniformValue("uNMat", qMat(VM).normalMatrix());
+    program.setUniformValue("uColor", color);
+}
+
+void MyGLWidget::renderModel(Model* model, const Matrix4f &V, QVector4D color) {
+    bindModel(model, V, color);
+    model->render(program);
 }
 
 void MyGLWidget::bindDebugMesh(Model* model, const Matrix4f& V, bool useVertexColor, QVector4D color) {
@@ -388,13 +404,10 @@ void MyGLWidget::paintGL() {
 
     Matrix4f V = camera.getViewMatrix();
     if (model && showModel) {
-        program.bind();
-        Matrix4f VM = V * model->getModelMatrix();
-        Matrix4f PVM = camera.projection * VM;
-        program.setUniformValue("uMVPMat",qMat(PVM));
-        program.setUniformValue("uNMat", qMat(VM).normalMatrix());
-        program.setUniformValue("uColor", QVector4D(0.75,0.75,0.75,1.0));
-        model->render(program);
+        renderModel(model.get(), V, QVector4D(0.75,0.75,0.75,1.0));
+    }
+    if (dmcModel && showDMCModel) {
+        renderModel(dmcModel.get(), V, QVector4D(1,0.75,0.0,1.0));
     }
     if (edgeIntersections && showEdgeIntesections) {
         renderDebugMesh(edgeIntersections.get(), V, true);
@@ -406,7 +419,7 @@ void MyGLWidget::paintGL() {
         renderDebugMesh(outGridPoints.get(), V, false, QVector4D(1,0,0,1));
     }
     if (dmcVertices && showDMCVertices) {
-        bindDebugMesh(dmcVertices.get(), V, false);
+        bindDebugMesh(dmcVertices.get(), V, true);
         if (showSingleCell)
             dmcVertices->render(programColor, v_offset[selectedLevel][selectedCell.x][selectedCell.y][selectedCell.z],
                                 v_count[selectedLevel][selectedCell.x][selectedCell.y][selectedCell.z]);
@@ -568,8 +581,10 @@ void MyGLWidget::dmc() {
     std::cout << "create sampler" << std::endl;
     CompressedHermiteSampler sampler(*(scan.data));
 
-    std::cout << "generate edge intersection model" << std::endl;
     aligned_vector3f positions, colors;
+    vector<uint> indices;
+
+    std::cout << "generate edge intersection model" << std::endl;
     sampler.edgeIntersections(voxelGridRadius, positions, colors);
     edgeIntersections = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
 
@@ -588,17 +603,32 @@ void MyGLWidget::dmc() {
     std::cout << "create octree" << std::endl;
     DMC.createOctree();
     std::cout << "create vertex tree" << std::endl;
-    DMC.createVertexTree();
+    DMC.createVertexTree();  
+    std::cout << "update collapsable flag" << std::endl;
+    DMC.collapse(0.0001);
+
+    std::cout << "create DMC Mesh" << std::endl;
+    positions.clear();
+    indices.clear();
+    DMC.createMesh(positions, indices);
+    dmcModel = unique_ptr<Model>(new Model(positions, indices, false));
+    dmcModel->setPosition(origin);
+    dmcModel->scale = 2*cellGridRadius;
 
     std::cout << "generate vertex model" << std::endl;
     positions.clear();
-    DMC.vertices(voxelGridRadius, positions, v_offset, v_count);
-    dmcVertices = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
+    colors.clear();
+    DMC.vertices(positions, colors, v_offset, v_count);
+    dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
+    dmcVertices->setPosition(origin);
+    dmcVertices->scale = 2*cellGridRadius;
 
     std::cout << "generate cell model" << std::endl;
     positions.clear();
-    DMC.cells(voxelGridRadius, positions, cell_offset);
+    DMC.cells(positions, cell_offset);
     cells = unique_ptr<Model>(new Model(positions, GL_LINES, false));
+    cells->setPosition(origin);
+    cells->scale = 2*cellGridRadius;
 
     for (int i = 0; i < levels; ++i) {
         uint levelSize = pow2(i);
