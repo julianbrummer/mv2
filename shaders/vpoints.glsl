@@ -1,3 +1,4 @@
+#version 150
 #ifdef GL_ES
 // Set default precision to medium
 precision mediump int;
@@ -17,7 +18,7 @@ void main() {
     if (useVertexColor)
         color = a_color;
     else
-        color = uColor;
+        color = uColor.xyz;
     gl_Position = uMVPMat * vec4(a_position,1.0);
 }
 
