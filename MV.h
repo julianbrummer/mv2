@@ -7,6 +7,7 @@
 #include <QtCore>
 #include <QLocale>
 #include <QInputDialog>
+#include <QLabel>
 
 #include <QtOpenGL/QGLWidget>
 #include <QtOpenGL/QGLFunctions>
@@ -22,24 +23,28 @@
 using namespace Eigen;
 using namespace std;
 
-class MyGLWidget;
+class ConturingWidget;
 
 class CGMainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
 
+    static const int SLIDER_GRANULARITY = 1000;
+
     CGMainWindow (QWidget* parent = 0);
     ~CGMainWindow ();
-    MyGLWidget *ogl;
+    ConturingWidget *ogl;
+    QLabel* t_error_label;
 
 public slots:
     void loadModel();
     //void loadTrack();
+    void sliderValueChanged(int value);
 };
 
 
-class MyGLWidget : public QGLWidget, public QOpenGLFunctions_2_0 {
+class ConturingWidget : public QGLWidget, public QOpenGLFunctions_2_0 {
     Q_OBJECT
 
 public slots:
@@ -77,20 +82,30 @@ public slots:
         updateGL();
     }
 
+    void updateDMCMesh();
     void dmc();
+
+
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-    MyGLWidget(CGMainWindow*,QWidget*);
+    static const int CELL_EDGES_VERTEX_COUNT = 24;
+    static const float CAMERA_MOVEMENT_SPEED;
+    static const float CAMERA_SCROLL_FACTOR;
+    static const float MIN_ERROR_THRESHOLD;
+    static const float MAX_ERROR_THRESHOLD;
+    static const int DEFAULT_RESOLUTION = 128;
+    static const int MAX_RESOLUTION = 512;
+
+    ConturingWidget(CGMainWindow*,QWidget*);
     bool initShaderProgram(const char *vname, const char *fname, QGLShaderProgram& program);
     void initializeGL();
 
     void trackballCoord(int x, int y, Vector3f& v);
     Quaternionf trackball(const Vector3f& u, const Vector3f& v);
 
-    static const int CELL_EDGES_VERTEX_COUNT = 24;
-    static const float CAMERA_MOVEMENT_SPEED;
-    static const float CAMERA_SCROLL_FACTOR;
+    void updateThreshold(float s);
+
     unique_ptr<Model> model, edgeIntersections, inGridPoints, outGridPoints, dmcVertices, dmcModel, cells;
     Camera camera;
 
@@ -101,6 +116,7 @@ public:
          showDMCModel, showDMCVertices, showCells, showSingleCell;
 
     uint res;
+    float errorThreshold;
     int levels;
 
     //qreal timestep;
@@ -127,6 +143,7 @@ private:
     void renderModel(Model* model, const Matrix4f &V, QVector4D color);
     void bindDebugMesh(Model* model, const Matrix4f &V, bool useVertexColor = false, QVector4D color = QVector4D(1,1,1,1));
     void renderDebugMesh(Model* model, const Matrix4f &V, bool useVertexColor = false, QVector4D color = QVector4D(1,1,1,1));
+    void createDMCMesh();
 
     QGLShaderProgram program, programColor;
     QGLShaderProgram programScan;
@@ -144,6 +161,8 @@ private:
     // the count of vertices in the VBO for each level
     vector<uint> v_level_count, cell_level_count;
     float voxelGridRadius, cellGridRadius;
+
+    unique_ptr<DualMarchingCubes> DMC;
 
 
 };

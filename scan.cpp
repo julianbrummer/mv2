@@ -205,8 +205,15 @@ bool CompressedHermiteData::unpack(uint data, float& d, Vector3f& n) {
     return true;
 }
 
-inline void CompressedHermiteSampler::step(uint orientation, const Index& edge, const Index& to, queue<Index> &indices) {
-    if (sign(to) && data->frontface_cut(orientation, edge) == 0 && data->backface_cut(orientation, edge) == 0) {
+inline void CompressedHermiteSampler::stepForward(uint orientation, const Index& edge, const Index& to, queue<Index> &indices) {
+    if (sign(to) && data->frontface_cut(orientation, edge) == 0) {
+        setSign(to, false);
+        indices.push(to);
+    }
+}
+
+inline void CompressedHermiteSampler::stepBackward(uint orientation, const Index& edge, const Index& to, queue<Index> &indices) {
+    if (sign(to) && data->backface_cut(orientation, edge) == 0) {
         setSign(to, false);
         indices.push(to);
     }
@@ -220,16 +227,16 @@ void CompressedHermiteSampler::floodFill() {
     Index edge(0,0,0);
     while (!indices.empty()) {
         Index& from = indices.front();
-        step(0, from, from.shiftX(1), indices);
-        step(1, from, from.shiftY(1), indices);
-        step(2, from, from.shiftZ(1), indices);
+        stepForward(0, from, from.shiftX(1), indices);
+        stepForward(1, from, from.shiftY(1), indices);
+        stepForward(2, from, from.shiftZ(1), indices);
 
         edge = from.shiftX(-1);
-        step(0, edge, edge, indices);
+        stepBackward(0, edge, edge, indices);
         edge = from.shiftY(-1);
-        step(1, edge, edge, indices);
+        stepBackward(1, edge, edge, indices);
         edge = from.shiftZ(-1);
-        step(2, edge, edge, indices);
+        stepBackward(2, edge, edge, indices);
         indices.pop();
     }
 }

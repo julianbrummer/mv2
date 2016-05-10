@@ -416,11 +416,12 @@ public:
     vector<shared_ptr<VertexNode>> strayVertices;
     // the (clustered) vertices in this cell
     vector<shared_ptr<VertexNode>> vertices;
-    DMCOctreeCell(uint8_t level) : OctreeNode(level)  {}
+    DMCOctreeCell(uint8_t level) : OctreeNode(level), collapsed(false)  {}
     virtual VertexNode* vertexAssignedTo(uint edgeIndex) const {return nullptr;}
     virtual bool hasChildren() const {return false;}
     virtual DMCOctreeCell* child(uint i) const {return nullptr;}
     bool isHomogeneous() const;
+    bool collapsed;
 };
 
 class DMCOctreeNode : public DMCOctreeCell {
@@ -488,7 +489,7 @@ private:
     HermiteDataSampler* sampler;
     unique_ptr<DMCOctreeNode> root;
 // init octree
-    bool inCell(Vector3d& pos, const Vector3d& cellOrigin, const double size) const;
+    bool inCell(Vector3d& pos, const Vector3d& cellOrigin, double size, double eps) const;
     void initQEF(const int edges[], uint count, const Index& cell_index, QEF& qef) const;
     void generateVertex(const Index &cell_index, uint8_t level, QEF& qef, Vector3f& v);
     void createVertexNodes(DMCOctreeLeaf &leaf, const Index& leaf_index);
@@ -501,7 +502,7 @@ private:
                      uint& maxSurfaceIndex, const vector<shared_ptr<VertexNode> > &vertices);
     void clusterCell(const Index &cell_index, DMCOctreeCell* node);
 
-    void updateCollapsableFlag(const DMCOctreeCell *node, float max_error);
+    bool updateCollapsableFlag(DMCOctreeCell *node, float max_error);
 // build mesh
     vector<VertexNode*> makeUnique(const array<VertexNode*, 4> v);
     void triangle(const vector<VertexNode*> v, initializer_list<int> index_order,

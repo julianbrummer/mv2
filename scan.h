@@ -65,7 +65,8 @@ public:
 class CompressedHermiteSampler : public HermiteDataSampler {
 private:
     CompressedHermiteData* data;
-    inline void step(uint orientation, const Index& edge, const Index &to, queue<Index>& indices);
+    inline void stepForward(uint orientation, const Index& edge, const Index &to, queue<Index>& indices);
+    inline void stepBackward(uint orientation, const Index& edge, const Index &to, queue<Index>& indices);
     void floodFill();
     uint compressedEdgeData(uint orientation, const Index& from) const;
 public:

@@ -4,7 +4,9 @@
 #include <QStatusBar>
 #include <QFileDialog>
 #include <QKeyEvent>
-
+#include <QSlider>
+#include <QLabel>
+#include <QPushButton>
 
 #include "MV.h"
 
@@ -25,7 +27,9 @@ CGMainWindow::CGMainWindow (QWidget* parent)
     f->setLineWidth(2);
 
     // Create our OpenGL widget
-    ogl = new MyGLWidget (this,f);
+    ogl = new ConturingWidget (this,f);
+    ogl->setFocusPolicy(Qt::StrongFocus); // for keyboard events
+    ogl->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
 
     // Create a menu
     QMenu *file = new QMenu("&File",this);
@@ -34,35 +38,52 @@ CGMainWindow::CGMainWindow (QWidget* parent)
     file->addAction ("DMC", ogl, SLOT(dmc()), Qt::CTRL+Qt::Key_D);
     file->addAction ("Quit", qApp, SLOT(quit()), Qt::CTRL+Qt::Key_Q);
 
-    menuBar()->addMenu(file);
+    menuBar()->addMenu(file);               
 
     QMenu *view = new QMenu("&View",this);
-    view->addAction ("Model", ogl, SLOT(toggleViewModel()), Qt::Key_M);
-    view->addAction ("Edge Intersections", ogl, SLOT(toggleViewEdgeIntersections()), Qt::Key_E);
-    view->addAction ("Inner Grid", ogl, SLOT(toggleViewInGridPoints()), Qt::Key_I);
-    view->addAction ("Outer Grid", ogl, SLOT(toggleViewOutGridPoints()), Qt::Key_O);
-    view->addAction ("Vertices", ogl, SLOT(toggleViewDMCVertices()), Qt::Key_V);   
-    view->addAction ("DMC Mesh", ogl, SLOT(toggleViewDMCModel()), Qt::Key_D);
-    view->addAction ("Cells", ogl, SLOT(toggleViewCells()), Qt::Key_C);
+    view->addAction ("Model", ogl, SLOT(toggleViewModel()), Qt::Key_M)->setCheckable(true);
+    view->addAction ("Edge Intersections", ogl, SLOT(toggleViewEdgeIntersections()), Qt::Key_E)->setCheckable(true);
+    view->addAction ("Inner Grid", ogl, SLOT(toggleViewInGridPoints()), Qt::Key_I)->setCheckable(true);
+    view->addAction ("Vertices", ogl, SLOT(toggleViewDMCVertices()), Qt::Key_V)->setCheckable(true);
+    view->addAction ("DMC Mesh", ogl, SLOT(toggleViewDMCModel()), Qt::Key_D)->setCheckable(true);
+    view->addAction ("Cells", ogl, SLOT(toggleViewCells()), Qt::Key_C)->setCheckable(true);
     view->addAction ("Toggle Level/Cell", ogl, SLOT(toggleViewCellLevel()), Qt::Key_L);
-    view->addAction ("Higher Level", ogl, SLOT(decreaseSelectedLevel()), Qt::Key_Plus);
-    view->addAction ("Lower Level", ogl, SLOT(increaseSelectedLevel()), Qt::Key_Minus);
+    view->addAction ("Higher Level", ogl, SLOT(decreaseSelectedLevel()), Qt::Key_Up);
+    view->addAction ("Lower Level", ogl, SLOT(increaseSelectedLevel()), Qt::Key_Down);
     view->addAction ("Center Camera", ogl, SLOT(centerCamera()), Qt::Key_Comma);
 
     menuBar()->addMenu(view);
 
 
+    QSlider *threshold_slider = new QSlider(Qt::Horizontal);
+    threshold_slider->setMinimum(0);
+    threshold_slider->setMaximum(SLIDER_GRANULARITY);
+    threshold_slider->setSliderPosition(0);
+    QLabel *threshold_label = new QLabel("Error Threshold");
+    t_error_label = new QLabel(to_string(ogl->errorThreshold).c_str());
+    QPushButton *simplify_button = new QPushButton("Simplify");
 
+    threshold_label->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+    t_error_label->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
+    threshold_slider->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+    simplify_button->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
 
+    connect(threshold_slider,SIGNAL(valueChanged(int)),this,SLOT(sliderValueChanged(int)));
+    connect(simplify_button,SIGNAL(clicked(bool)),ogl,SLOT(updateDMCMesh()));
 
-    // Put the GL widget inside the frame
-    QHBoxLayout* layout = new QHBoxLayout();
+    // Put the widgets inside the frame
+    QVBoxLayout* layout = new QVBoxLayout();
+    QHBoxLayout* topbar = new QHBoxLayout();
+    topbar->addWidget(threshold_label);
+    topbar->addWidget(threshold_slider);
+    topbar->addWidget(t_error_label);
+    topbar->addWidget(simplify_button);
+    layout->addLayout(topbar);
     layout->addWidget(ogl);
     layout->setMargin(0);
     f->setLayout(layout);
     setCentralWidget(f);
 
-    ogl->setFocusPolicy(Qt::StrongFocus); // for keyboard events
     statusBar()->showMessage("Ready",1000);
 }
 
@@ -303,7 +324,7 @@ void CGMainWindow::loadModel() {
         LoadOffFile(filename.toLatin1(), positions, normals);
 */
     aligned_vector3f positions, normals;
-    LoadOffFile("D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/models/bunny.off", positions, normals);
+    LoadOffFile("D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/models/fandisk.off", positions, normals);
     ogl->model = unique_ptr<Model>(new Model(positions, normals, GL_TRIANGLES, true, 1.8));
     ogl->camera.position = ogl->camera.rotation._transformVector(Z_AXIS) + ogl->camera.center;
     statusBar()->showMessage ("Loading model done.",3000);
@@ -311,14 +332,23 @@ void CGMainWindow::loadModel() {
     ogl->updateGL();
 }
 
-const float MyGLWidget::CAMERA_MOVEMENT_SPEED = 0.0025;
-const float MyGLWidget::CAMERA_SCROLL_FACTOR = 1.2;
-
-MyGLWidget::MyGLWidget (CGMainWindow *mainwindow,QWidget* parent ) : QGLWidget (parent) {
-    main = mainwindow;
+void CGMainWindow::sliderValueChanged(int value) {
+    ogl->updateThreshold((float)value/SLIDER_GRANULARITY);
+    t_error_label->setText(to_string(ogl->errorThreshold).c_str());
 }
 
-bool MyGLWidget::initShaderProgram(const char *vname, const char *fname, QGLShaderProgram& program) {
+const float ConturingWidget::CAMERA_MOVEMENT_SPEED = 0.0025;
+const float ConturingWidget::CAMERA_SCROLL_FACTOR = 1.2;
+const float ConturingWidget::MIN_ERROR_THRESHOLD = 0;
+const float ConturingWidget::MAX_ERROR_THRESHOLD = 0.001;
+
+ConturingWidget::ConturingWidget (CGMainWindow *mainwindow,QWidget* parent ) : QGLWidget (parent) {
+    main = mainwindow;
+    errorThreshold = MIN_ERROR_THRESHOLD;
+    res = DEFAULT_RESOLUTION;
+}
+
+bool ConturingWidget::initShaderProgram(const char *vname, const char *fname, QGLShaderProgram& program) {
     setlocale(LC_NUMERIC, "C");
     // shader
     if (!program.addShaderFromSourceFile(QGLShader::Vertex, vname))
@@ -336,7 +366,7 @@ bool MyGLWidget::initShaderProgram(const char *vname, const char *fname, QGLShad
     return true;
 }
 
-void MyGLWidget::initializeGL() {
+void ConturingWidget::initializeGL() {
     initializeOpenGLFunctions();
     initShaderProgram(":/shaders/vshader.glsl", ":/shaders/fshader.glsl", program);
     initShaderProgram(":/shaders/vpoints.glsl", ":/shaders/fpoints.glsl", programColor);
@@ -350,7 +380,6 @@ void MyGLWidget::initializeGL() {
     rotX = rotY = 0;
     zoom = 1.0f;
 
-    res = 128;
     levels = i_log2(res)+1;
     voxelGridRadius = 1.0f;
     cellGridRadius = voxelGridRadius-voxelGridRadius/(res+1);
@@ -371,7 +400,7 @@ void MyGLWidget::initializeGL() {
     selectedLevel = 0;
 }
 
-void MyGLWidget::bindModel(Model* model, const Matrix4f& V, QVector4D color) {
+void ConturingWidget::bindModel(Model* model, const Matrix4f& V, QVector4D color) {
     program.bind();
     Matrix4f VM = V * model->getModelMatrix();
     Matrix4f PVM = camera.projection * VM;
@@ -380,12 +409,12 @@ void MyGLWidget::bindModel(Model* model, const Matrix4f& V, QVector4D color) {
     program.setUniformValue("uColor", color);
 }
 
-void MyGLWidget::renderModel(Model* model, const Matrix4f &V, QVector4D color) {
+void ConturingWidget::renderModel(Model* model, const Matrix4f &V, QVector4D color) {
     bindModel(model, V, color);
     model->render(program);
 }
 
-void MyGLWidget::bindDebugMesh(Model* model, const Matrix4f& V, bool useVertexColor, QVector4D color) {
+void ConturingWidget::bindDebugMesh(Model* model, const Matrix4f& V, bool useVertexColor, QVector4D color) {
     programColor.bind();
     Matrix4f VM = V * model->getModelMatrix();
     Matrix4f PVM = camera.projection * VM;
@@ -394,12 +423,12 @@ void MyGLWidget::bindDebugMesh(Model* model, const Matrix4f& V, bool useVertexCo
     programColor.setUniformValue("uColor", color);
 }
 
-void MyGLWidget::renderDebugMesh(Model* model, const Matrix4f &V, bool useVertexColor, QVector4D color) {
+void ConturingWidget::renderDebugMesh(Model* model, const Matrix4f &V, bool useVertexColor, QVector4D color) {
     bindDebugMesh(model, V, useVertexColor, color);
     model->render(programColor);
 }
 
-void MyGLWidget::paintGL() {
+void ConturingWidget::paintGL() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     Matrix4f V = camera.getViewMatrix();
@@ -440,7 +469,7 @@ void MyGLWidget::paintGL() {
     }
 }
 
-void MyGLWidget::resizeGL(int width, int height) {
+void ConturingWidget::resizeGL(int width, int height) {
     w = width;
     h = height;
     glViewport(0,0,w,h);
@@ -454,14 +483,14 @@ void MyGLWidget::resizeGL(int width, int height) {
     updateGL();
 }
 
-void MyGLWidget::wheelEvent(QWheelEvent* event) {
+void ConturingWidget::wheelEvent(QWheelEvent* event) {
     int delta = event->delta();
     zoom *= (delta < 0)? CAMERA_SCROLL_FACTOR : 1/CAMERA_SCROLL_FACTOR;
     camera.position = camera.rotation._transformVector(zoom*Z_AXIS) + camera.center;
     updateGL();
 }
 
-void MyGLWidget::trackballCoord(int x, int y, Vector3f& v) {
+void ConturingWidget::trackballCoord(int x, int y, Vector3f& v) {
 #ifdef MAC_QT5_BUG
     x*=2;
     y*=2;
@@ -480,7 +509,7 @@ void MyGLWidget::trackballCoord(int x, int y, Vector3f& v) {
     } else v[2] = sqrt(1.0-d*d);
 }
 
-Quaternionf MyGLWidget::trackball(const Vector3f& u, const Vector3f& v) {
+Quaternionf ConturingWidget::trackball(const Vector3f& u, const Vector3f& v) {
     Vector3f uxv = u.cross(v);
     float uTv = u.transpose() * v;
     Quaternionf ret(1+uTv,uxv.x(), uxv.y(), uxv.z());
@@ -488,21 +517,7 @@ Quaternionf MyGLWidget::trackball(const Vector3f& u, const Vector3f& v) {
     return ret;
 }
 
-void MyGLWidget::keyPressEvent(QKeyEvent* event) {
-    if (showSingleCell) {
-        switch (event->key()) {
-        case Qt::Key_8: if (selectedCell.z > 0) selectedCell = selectedCell.shiftZ(-1); break;
-        case Qt::Key_2: if (selectedCell.z < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftZ(1); break;
-        case Qt::Key_4: if (selectedCell.x > 0) selectedCell = selectedCell.shiftX(-1); break;
-        case Qt::Key_6: if (selectedCell.x < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftX(1); break;
-        case Qt::Key_7: if (selectedCell.y > 0) selectedCell = selectedCell.shiftY(-1); break;
-        case Qt::Key_9: if (selectedCell.y < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftY(1); break;
-        }
-    }
-    updateGL();
-}
-
-void MyGLWidget::mousePressEvent(QMouseEvent *event) {
+void ConturingWidget::mousePressEvent(QMouseEvent *event) {
     button = event->button();
     oldX = event->x();
     oldY = event->y();
@@ -510,22 +525,11 @@ void MyGLWidget::mousePressEvent(QMouseEvent *event) {
     updateGL();
 }
 
-void MyGLWidget::mouseReleaseEvent(QMouseEvent*) {}
+void ConturingWidget::mouseReleaseEvent(QMouseEvent*) {}
 
-void MyGLWidget::mouseMoveEvent(QMouseEvent* event) {
+void ConturingWidget::mouseMoveEvent(QMouseEvent* event) {
     int x = event->x();
     int y = event->y();
-
-    if (button == Qt::MiddleButton) {
-        Vector3f u,v;
-
-        trackballCoord(oldX,oldY,u);
-        trackballCoord(x,y,v);
-
-        Quaternionf q = trackball(u,v);
-        model->rotate(q);
-    }
-
     if (button == Qt::LeftButton) {
         rotX -= 0.5*(y-oldY)*M_PI/180.0;
         rotY -= 0.5*(x-oldX)*M_PI/180.0;
@@ -549,9 +553,50 @@ void MyGLWidget::mouseMoveEvent(QMouseEvent* event) {
     updateGL();
 }
 
-void MyGLWidget::dmc() {
+void ConturingWidget::keyPressEvent(QKeyEvent* event) {
+    if (showSingleCell) {
+        switch (event->key()) {
+        case Qt::Key_8: if (selectedCell.z > 0) selectedCell = selectedCell.shiftZ(-1); break;
+        case Qt::Key_2: if (selectedCell.z < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftZ(1); break;
+        case Qt::Key_4: if (selectedCell.x > 0) selectedCell = selectedCell.shiftX(-1); break;
+        case Qt::Key_6: if (selectedCell.x < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftX(1); break;
+        case Qt::Key_7: if (selectedCell.y > 0) selectedCell = selectedCell.shiftY(-1); break;
+        case Qt::Key_9: if (selectedCell.y < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftY(1); break;
+        }
+    }
 
-    std::cout << "scan model" << std::endl;
+    updateGL();
+}
+
+void ConturingWidget::updateThreshold(float s) {
+    errorThreshold = MIN_ERROR_THRESHOLD + (MAX_ERROR_THRESHOLD-MIN_ERROR_THRESHOLD)*s;
+}
+
+void ConturingWidget::updateDMCMesh() {
+    if (DMC) {
+        main->statusBar()->showMessage(("simplify (t = " + to_string(errorThreshold) + ")...").c_str());
+        DMC->collapse(errorThreshold);
+        createDMCMesh();
+        updateGL();
+    }
+}
+
+void ConturingWidget::createDMCMesh() {
+    main->statusBar()->showMessage("create DMC Mesh...");
+    aligned_vector3f positions;
+    vector<uint> indices;
+    DMC->createMesh(positions, indices);
+    dmcModel = unique_ptr<Model>(new Model(positions, indices, false));
+    dmcModel->setPosition(origin);
+    dmcModel->scale = 2*cellGridRadius;
+    main->statusBar()->showMessage(("Done. "
+                                   + to_string(positions.size()) + " Vertices, "
+                                   + to_string(indices.size()/3) + " Triangles").c_str());
+}
+
+void ConturingWidget::dmc() {
+
+    main->statusBar()->showMessage("scan model...");
     CompressedHermiteScanner scan(FRONT_AND_BACK_XYZ, res, voxelGridRadius, programScan);
     QMatrix4x4 V;
     Matrix4f modelMat = model->getModelMatrix();
@@ -578,17 +623,19 @@ void MyGLWidget::dmc() {
     model->render(programScan);
     scan.end();
 
-    std::cout << "create sampler" << std::endl;
+    main->statusBar()->showMessage("create sampler...");
     CompressedHermiteSampler sampler(*(scan.data));
 
     aligned_vector3f positions, colors;
     vector<uint> indices;
-
+/*
+    main->statusBar()->showMessage("generate edge intersection model");
     std::cout << "generate edge intersection model" << std::endl;
     sampler.edgeIntersections(voxelGridRadius, positions, colors);
     edgeIntersections = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
 
     std::cout << "generate in grid model" << std::endl;
+    main->statusBar()->showMessage("generate in grid model");
     positions.clear();
     sampler.inside(voxelGridRadius, positions);
     inGridPoints = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
@@ -597,32 +644,34 @@ void MyGLWidget::dmc() {
     positions.clear();
     sampler.outside(voxelGridRadius, positions);
     outGridPoints = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
+*/
 
+    DMC = unique_ptr<DualMarchingCubes>(new DualMarchingCubes(sampler));
+    main->statusBar()->showMessage("create octree...");
+    DMC->createOctree();
+    main->statusBar()->showMessage("create vertex tree...");
+    DMC->createVertexTree();
 
-    DualMarchingCubes DMC(sampler);
-    std::cout << "create octree" << std::endl;
-    DMC.createOctree();
-    std::cout << "create vertex tree" << std::endl;
-    DMC.createVertexTree();  
-    std::cout << "update collapsable flag" << std::endl;
-    DMC.collapse(0.0001);
-
-    std::cout << "create DMC Mesh" << std::endl;
-    positions.clear();
-    indices.clear();
-    DMC.createMesh(positions, indices);
-    dmcModel = unique_ptr<Model>(new Model(positions, indices, false));
-    dmcModel->setPosition(origin);
-    dmcModel->scale = 2*cellGridRadius;
-
+    main->statusBar()->showMessage(("simplify (t = " + to_string(errorThreshold) + ")...").c_str());
+    DMC->collapse(errorThreshold);
+/*
+    main->statusBar()->showMessage("generate vertex model...");
     std::cout << "generate vertex model" << std::endl;
     positions.clear();
     colors.clear();
-    DMC.vertices(positions, colors, v_offset, v_count);
+    DMC->vertices(positions, colors, v_offset, v_count);
     dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
     dmcVertices->setPosition(origin);
     dmcVertices->scale = 2*cellGridRadius;
+*/
+    positions.clear();
+    indices.clear();
+    colors.clear();
 
+
+    createDMCMesh();
+
+/*
     std::cout << "generate cell model" << std::endl;
     positions.clear();
     DMC.cells(positions, cell_offset);
@@ -638,9 +687,8 @@ void MyGLWidget::dmc() {
                 for (uint z = 0; z < levelSize; ++z)
                     v_level_count[i] += v_count[i][x][y][z];
     }
-
+*/
     resizeGL(w,h);
-    std::cout << "done." << std::endl;
 }
 
 

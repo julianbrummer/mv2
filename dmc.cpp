@@ -123,6 +123,7 @@ DMCOctreeLeaf::DMCOctreeLeaf(uint8_t level) : DMCOctreeCell(level) {
     for (uint i = 0; i < 12; ++i) {
         edgeVertices[i] = -1;
     }
+    collapsed = true;
 }
 
 void DMCVerticesBuilder::handle(const DMCOctreeCell *node, const Index &index) {
@@ -219,32 +220,34 @@ void DualMarchingCubes::clusterEdge(array<DMCOctreeCell* , 4> nodes, uint orient
 
 void DualMarchingCubes::clusterFace(array<DMCOctreeCell*, 2> nodes, uint orientation,
                                     uint& maxSurfaceIndex, const vector<shared_ptr<VertexNode>>& vertices) {
-    for (int i = 0; i < 4; ++i) { // 4 faces tiling coarse face
-        // 2 child cells define 1 face
-        if (nodes[0]->child(face_face_mask[orientation][i][0])->hasChildren()
-                    && nodes[1]->child(face_face_mask[orientation][i][1])->hasChildren()) {
-                clusterFace(array<DMCOctreeCell*, 2>{
-                                nodes[0]->child(face_face_mask[orientation][i][0]),
-                                nodes[1]->child(face_face_mask[orientation][i][1])},
-                            orientation, maxSurfaceIndex, vertices);
+    if (!nodes[0]->collapsed && !nodes[1]->collapsed) {
+        for (int i = 0; i < 4; ++i) { // 4 faces tiling coarse face
+            // 2 child cells define 1 face
+            if (nodes[0]->child(face_face_mask[orientation][i][0])->hasChildren()
+                        && nodes[1]->child(face_face_mask[orientation][i][1])->hasChildren()) {
+                    clusterFace(array<DMCOctreeCell*, 2>{
+                                    nodes[0]->child(face_face_mask[orientation][i][0]),
+                                    nodes[1]->child(face_face_mask[orientation][i][1])},
+                                orientation, maxSurfaceIndex, vertices);
+            }
         }
-    }
 
 
-    for (uint i = 0; i < 4; ++i) { // 4 edges in coarse face
-        // 4 child cells define 1 edge
-        clusterEdge(array<DMCOctreeCell*, 4>{
-                        nodes[face_edge_mask[orientation][i][0][0]]->child(face_edge_mask[orientation][i][0][1]),
-                        nodes[face_edge_mask[orientation][i][1][0]]->child(face_edge_mask[orientation][i][1][1]),
-                        nodes[face_edge_mask[orientation][i][2][0]]->child(face_edge_mask[orientation][i][2][1]),
-                        nodes[face_edge_mask[orientation][i][3][0]]->child(face_edge_mask[orientation][i][3][1])},
-                    face_edge_orientation[orientation][i], maxSurfaceIndex, vertices);
+        for (uint i = 0; i < 4; ++i) { // 4 edges in coarse face
+            // 4 child cells define 1 edge
+            clusterEdge(array<DMCOctreeCell*, 4>{
+                            nodes[face_edge_mask[orientation][i][0][0]]->child(face_edge_mask[orientation][i][0][1]),
+                            nodes[face_edge_mask[orientation][i][1][0]]->child(face_edge_mask[orientation][i][1][1]),
+                            nodes[face_edge_mask[orientation][i][2][0]]->child(face_edge_mask[orientation][i][2][1]),
+                            nodes[face_edge_mask[orientation][i][3][0]]->child(face_edge_mask[orientation][i][3][1])},
+                        face_edge_orientation[orientation][i], maxSurfaceIndex, vertices);
+        }
     }
 
 }
 
 void DualMarchingCubes::clusterCell(const Index& cell_index, DMCOctreeCell* node) {
-    if (node->hasChildren()) {
+    if (node->hasChildren() && !node->collapsed) {
         // cluster children cells first
         for (uint i = 0; i < 8; ++i) {
             Index child_index = cell_index+sampler->nodeSize(node->level+1)*child_origin[i];
@@ -332,21 +335,25 @@ void DualMarchingCubes::clusterCell(const Index& cell_index, DMCOctreeCell* node
     }
 }
 
-void DualMarchingCubes::updateCollapsableFlag(const DMCOctreeCell *node, float max_error) {
+bool DualMarchingCubes::updateCollapsableFlag(DMCOctreeCell *node, float max_error) {
     // reset vertex indices
     for (shared_ptr<VertexNode> vNode : node->vertices)
         vNode->vertexIndex = -1;
 
     if (node->hasChildren()) { // only update non-leaf cells
+        node->collapsed = true;
         for (shared_ptr<VertexNode> vNode : node->vertices) {
             if (vNode->error <= max_error)
                 vNode->collapsable = true;
-            else
+            else {
                 vNode->collapsable = false;
+                node->collapsed = false;
+            }
         }
         for (int i = 0; i < 8; ++i)
-            updateCollapsableFlag(node->child(i), max_error);
+            node->collapsed &= updateCollapsableFlag(node->child(i), max_error);
     }
+    return node->collapsed;
 }
 
 vector<VertexNode*> DualMarchingCubes::makeUnique(const array<VertexNode*, 4> v) {
@@ -510,9 +517,9 @@ void DualMarchingCubes::cellProc(const DMCOctreeCell *node, aligned_vector3f& po
 
 }
 
-bool DualMarchingCubes::inCell(Vector3d& pos, const Vector3d& cellOrigin, const double size) const {
-    return pos[0] <= size+cellOrigin[0] && pos[1] <= size+cellOrigin[1] && pos[2] <= size+cellOrigin[2] &&
-           pos[0] >= cellOrigin[0] && pos[1] >= cellOrigin[1] && pos[2] >= cellOrigin[2];
+bool DualMarchingCubes::inCell(Vector3d& pos, const Vector3d& cellOrigin, double size, double eps) const {
+    return pos[0] <= size+cellOrigin[0]+eps && pos[1] <= size+cellOrigin[1]+eps && pos[2] <= size+cellOrigin[2]+eps &&
+           pos[0] >= cellOrigin[0]-eps && pos[1] >= cellOrigin[1]-eps && pos[2] >= cellOrigin[2]-eps;
 }
 
 void DualMarchingCubes::generateVertex(const Index& cell_index, uint8_t level, QEF& qef, Vector3f& v) {
@@ -522,7 +529,7 @@ void DualMarchingCubes::generateVertex(const Index& cell_index, uint8_t level, Q
     Vector3d cell_origin(cell_index.x,cell_index.y, cell_index.z);
     cell_origin /= sampler->res;
     double cell_size = cellSize(level);
-    if (inCell(vQEF, cell_origin, cell_size)) {
+    if (inCell(vQEF, cell_origin, cell_size, cell_size)) {
         v = vQEF.cast<float>();
     } else
         v = qef.m;
