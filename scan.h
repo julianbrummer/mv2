@@ -64,13 +64,13 @@ public:
 
 class CompressedHermiteSampler : public HermiteDataSampler {
 private:
-    CompressedHermiteData* data;
+    shared_ptr<CompressedHermiteData> data;
     inline void stepForward(uint orientation, const Index& edge, const Index &to, queue<Index>& indices);
     inline void stepBackward(uint orientation, const Index& edge, const Index &to, queue<Index>& indices);
     void floodFill();
     uint compressedEdgeData(uint orientation, const Index& from) const;
 public:
-    CompressedHermiteSampler(CompressedHermiteData& data);
+    CompressedHermiteSampler(CompressedHermiteData* data);
     bool frontEdgeInfo(uint orientation, const Index& from, float& d, Vector3f& n) const override;
     bool backEdgeInfo(uint orientation, const Index& from, float& d, Vector3f& n) const override;
     bool intersectsEdge(uint orientation, const Index &from, float& d, Vector3f& n) const override;

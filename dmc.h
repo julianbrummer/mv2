@@ -486,7 +486,7 @@ public:
 
 class DualMarchingCubes {
 private:
-    HermiteDataSampler* sampler;
+    shared_ptr<HermiteDataSampler> sampler;
     unique_ptr<DMCOctreeNode> root;
 // init octree
     bool inCell(Vector3d& pos, const Vector3d& cellOrigin, double size, double eps) const;
@@ -522,7 +522,7 @@ private:
 
 public:
     float truncation;
-    DualMarchingCubes(HermiteDataSampler& sampler) : sampler(&sampler), truncation(0.1f) {}
+    DualMarchingCubes(HermiteDataSampler* sampler) : sampler(sampler), truncation(0.1f) {}
     void createOctree();
     void createVertexTree();
     void collapse(float max_error);

@@ -576,6 +576,16 @@ void ConturingWidget::updateDMCMesh() {
     if (DMC) {
         main->statusBar()->showMessage(("simplify (t = " + to_string(errorThreshold) + ")...").c_str());
         DMC->collapse(errorThreshold);
+/*
+        main->statusBar()->showMessage("generate vertex model...");
+        aligned_vector3f positions, colors;
+        v_offset.clear();
+        v_count.clear();
+        DMC->vertices(positions, colors, v_offset, v_count);
+        dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
+        dmcVertices->setPosition(origin);
+        dmcVertices->scale = 2*cellGridRadius;
+*/
         createDMCMesh();
         updateGL();
     }
@@ -597,34 +607,34 @@ void ConturingWidget::createDMCMesh() {
 void ConturingWidget::dmc() {
 
     main->statusBar()->showMessage("scan model...");
-    CompressedHermiteScanner scan(FRONT_AND_BACK_XYZ, res, voxelGridRadius, programScan);
+    CompressedHermiteScanner* scan = new CompressedHermiteScanner(FRONT_AND_BACK_XYZ, res, voxelGridRadius, programScan);
     QMatrix4x4 V;
     Matrix4f modelMat = model->getModelMatrix();
     QMatrix4x4 M = qMat(modelMat);
 
-    scan.begin(FRONT_AND_BACK_FACES_X, V);
+    scan->begin(FRONT_AND_BACK_FACES_X, V);
     QMatrix4x4 VM = V * M;
-    programScan.setUniformValue("uMVPMat", scan.projection * VM);
+    programScan.setUniformValue("uMVPMat", scan->projection * VM);
     programScan.setUniformValue("uNMat", M.normalMatrix());
     model->render(programScan);
-    scan.end();
+    scan->end();
 
-    scan.begin(FRONT_AND_BACK_FACES_Y, V);
+    scan->begin(FRONT_AND_BACK_FACES_Y, V);
     VM = V * M;
-    programScan.setUniformValue("uMVPMat", scan.projection * VM);
+    programScan.setUniformValue("uMVPMat", scan->projection * VM);
     programScan.setUniformValue("uNMat", M.normalMatrix());
     model->render(programScan);
-    scan.end();
+    scan->end();
 
-    scan.begin(FRONT_AND_BACK_FACES_Z, V);
+    scan->begin(FRONT_AND_BACK_FACES_Z, V);
     VM = V * M;
-    programScan.setUniformValue("uMVPMat", scan.projection * VM);
+    programScan.setUniformValue("uMVPMat", scan->projection * VM);
     programScan.setUniformValue("uNMat", M.normalMatrix());
     model->render(programScan);
-    scan.end();
+    scan->end();
 
     main->statusBar()->showMessage("create sampler...");
-    CompressedHermiteSampler sampler(*(scan.data));
+    CompressedHermiteSampler* sampler = new CompressedHermiteSampler(scan->data.get());
 
     aligned_vector3f positions, colors;
     vector<uint> indices;
@@ -656,25 +666,16 @@ void ConturingWidget::dmc() {
     DMC->collapse(errorThreshold);
 /*
     main->statusBar()->showMessage("generate vertex model...");
-    std::cout << "generate vertex model" << std::endl;
     positions.clear();
     colors.clear();
     DMC->vertices(positions, colors, v_offset, v_count);
     dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
     dmcVertices->setPosition(origin);
     dmcVertices->scale = 2*cellGridRadius;
-*/
+
+    main->statusBar()->showMessage("generate cell model...");
     positions.clear();
-    indices.clear();
-    colors.clear();
-
-
-    createDMCMesh();
-
-/*
-    std::cout << "generate cell model" << std::endl;
-    positions.clear();
-    DMC.cells(positions, cell_offset);
+    DMC->cells(positions, cell_offset);
     cells = unique_ptr<Model>(new Model(positions, GL_LINES, false));
     cells->setPosition(origin);
     cells->scale = 2*cellGridRadius;
@@ -688,6 +689,15 @@ void ConturingWidget::dmc() {
                     v_level_count[i] += v_count[i][x][y][z];
     }
 */
+    positions.clear();
+    indices.clear();
+    colors.clear();
+
+
+    createDMCMesh();
+
+
+
     resizeGL(w,h);
 }
 

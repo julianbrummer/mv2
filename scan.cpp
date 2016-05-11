@@ -184,7 +184,7 @@ CompressedHermiteScanner::~CompressedHermiteScanner() {
     textures.clear();
 }
 
-CompressedHermiteSampler::CompressedHermiteSampler(CompressedHermiteData& data) : HermiteDataSampler(data.res), data(&data) {
+CompressedHermiteSampler::CompressedHermiteSampler(CompressedHermiteData *data) : HermiteDataSampler(data->res), data(data) {
     floodFill();
 }
 
