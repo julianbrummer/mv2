@@ -39,7 +39,7 @@ public:
 
 public slots:
     void loadModel();
-    //void loadTrack();
+    void loadTrack();
     void sliderValueChanged(int value);
 };
 
@@ -94,7 +94,7 @@ public:
     static const float CAMERA_SCROLL_FACTOR;
     static const float MIN_ERROR_THRESHOLD;
     static const float MAX_ERROR_THRESHOLD;
-    static const int DEFAULT_RESOLUTION = 128;
+    static const int DEFAULT_RESOLUTION = 256;
     static const int MAX_RESOLUTION = 512;
 
     ConturingWidget(CGMainWindow*,QWidget*);
@@ -105,6 +105,7 @@ public:
     Quaternionf trackball(const Vector3f& u, const Vector3f& v);
 
     void updateThreshold(float s);
+    void updateTrafoModel();
 
     unique_ptr<Model> model, edgeIntersections, inGridPoints, outGridPoints, dmcVertices, dmcModel, cells;
     Camera camera;
@@ -119,10 +120,9 @@ public:
     float errorThreshold;
     int levels;
 
-    //qreal timestep;
-
-    //std::vector<QMatrix4x4> trafo;
-    //int trafo_cnt;
+    qreal timestep;
+    Trafo trafo;
+    int trafo_now;
 
 protected:
 
@@ -139,11 +139,12 @@ protected:
     int oldX,oldY,button;
 
 private:
-    void bindModel(Model* model, const Matrix4f& V, QVector4D color);
-    void renderModel(Model* model, const Matrix4f &V, QVector4D color);
+    void bindModel(const Matrix4f &VM, QVector4D color);
+    void renderModel(Model* model, const Matrix4f &VM, QVector4D color);
     void bindDebugMesh(Model* model, const Matrix4f &V, bool useVertexColor = false, QVector4D color = QVector4D(1,1,1,1));
     void renderDebugMesh(Model* model, const Matrix4f &V, bool useVertexColor = false, QVector4D color = QVector4D(1,1,1,1));
     void createDMCMesh();
+    void scanModel(const QMatrix4x4& P, const QMatrix4x4& V, const Matrix4f &M);
 
     QGLShaderProgram program, programColor;
     QGLShaderProgram programScan;

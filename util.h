@@ -12,8 +12,12 @@ using namespace std;
 
 void normalMatrix(const Matrix4f& mvMat, Matrix3f& normalMat);
 
-QMatrix4x4 qMat(Matrix4f &M);
+QMatrix4x4 qMat(const Matrix4f &M);
 
-QMatrix3x3 qMat(Matrix3f &M);
+QMatrix3x3 qMat(const Matrix3f &M);
+
+QVector3D qVec(const Vector3f& v);
+
+QVector4D qVec(const Vector4f& v);
 
 #endif // UTIL_H

@@ -293,11 +293,11 @@ void DualMarchingCubes::clusterCell(const Index& cell_index, DMCOctreeCell* node
 
         sort(vertices.begin(), vertices.end(), compareSurfaceIndex);
 
-        int8_t last_index = -1;
+        int last_index = -1;
         // the count of QEF masspoints per cluster/surface
         vector<uint> mCount;
         for (shared_ptr<VertexNode> v : vertices) {
-            int8_t index = v->surfaceIndex;
+            int index = v->surfaceIndex;
             if (index == -1) // stray vertex may be clustered in higher level
                node->strayVertices.push_back(v);
             else {
@@ -532,10 +532,10 @@ void DualMarchingCubes::generateVertex(const Index& cell_index, uint8_t level, Q
     Vector3d cell_origin(cell_index.x,cell_index.y, cell_index.z);
     cell_origin /= sampler->res;
     double cell_size = cellSize(level);
-    if (inCell(vQEF, cell_origin, cell_size, cell_size)) {
+    //if (inCell(vQEF, cell_origin, cell_size, 0)) {
         v = vQEF.cast<float>();
-    } else
-        v = qef.m;
+    //} else
+    //    v = qef.m;
 
     //TODO better vertex placement
 }
@@ -601,6 +601,8 @@ void DualMarchingCubes::createOctreeNodes(DMCOctreeNode& parent, uint parent_siz
     } else {
         // create nodes
         for (int i = 0; i < 8; ++i) {
+//            if (parent.level == 0)
+//                std::cout << i << std::endl;
             Index child_index = parent_index + child_size*child_origin[i];
             unique_ptr<DMCOctreeNode> child(new DMCOctreeNode(parent.level+1));
             createOctreeNodes(*child, child_size, child_index);

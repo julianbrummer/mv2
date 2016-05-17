@@ -7,13 +7,14 @@
 #include <QSlider>
 #include <QLabel>
 #include <QPushButton>
-
+#include <iostream>
 #include "MV.h"
 
-#include <iostream>
-#include "OffReader.h"
+
+#include "reader.h"
 #include "scan.h"
 #include "util.h"
+
 
 CGMainWindow *w;
 
@@ -48,8 +49,8 @@ CGMainWindow::CGMainWindow (QWidget* parent)
     view->addAction ("DMC Mesh", ogl, SLOT(toggleViewDMCModel()), Qt::Key_D)->setCheckable(true);
     view->addAction ("Cells", ogl, SLOT(toggleViewCells()), Qt::Key_C)->setCheckable(true);
     view->addAction ("Toggle Level/Cell", ogl, SLOT(toggleViewCellLevel()), Qt::Key_L);
-    view->addAction ("Higher Level", ogl, SLOT(decreaseSelectedLevel()), Qt::Key_Up);
-    view->addAction ("Lower Level", ogl, SLOT(increaseSelectedLevel()), Qt::Key_Down);
+    view->addAction ("Higher Level", ogl, SLOT(decreaseSelectedLevel()), Qt::Key_Plus);
+    view->addAction ("Lower Level", ogl, SLOT(increaseSelectedLevel()), Qt::Key_Minus);
     view->addAction ("Center Camera", ogl, SLOT(centerCamera()), Qt::Key_Comma);
 
     menuBar()->addMenu(view);
@@ -295,7 +296,7 @@ void writeToOffFile(std::vector<QVector3D>& vertex, std::vector<int>& face,const
 
     offFile.close();
 }
-
+*/
 void CGMainWindow::loadTrack() {
 // QString filename = QFileDialog::getOpenFileName(this, "Load track ...", QString(), "(*.vda)" );
 
@@ -306,9 +307,10 @@ void CGMainWindow::loadTrack() {
 //     std::ifstream trackfile(filename.toLatin1());
 // }
 
-    getFromVdaFile(ogl->trafo,"tracks/track.vda",ogl->timestep);
+    LoadVdaFile(ogl->trafo.M,"D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/tracks/track.vda",ogl->trafo.scale, ogl->timestep);
+    ogl->updateTrafoModel();
 }
-*/
+
 void CGMainWindow::loadModel() {
 /*
     QString filename = QFileDialog::getOpenFileName(this, "Load model ...", QString(), "(*.stl *.off)" );
@@ -324,8 +326,9 @@ void CGMainWindow::loadModel() {
         LoadOffFile(filename.toLatin1(), positions, normals);
 */
     aligned_vector3f positions, normals;
-    LoadOffFile("D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/models/fandisk.off", positions, normals);
+    LoadOffFile("D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/models/motor.off", positions, normals);
     ogl->model = unique_ptr<Model>(new Model(positions, normals, GL_TRIANGLES, true, 1.8));
+    ogl->updateTrafoModel();
     ogl->camera.position = ogl->camera.rotation._transformVector(Z_AXIS) + ogl->camera.center;
     statusBar()->showMessage ("Loading model done.",3000);
     ogl->showModel = true;
@@ -387,7 +390,9 @@ void ConturingWidget::initializeGL() {
     v_level_count = vector<uint>(levels, 0);
     cell_level_count = vector<uint>(levels, 0);
 
-    //main->loadTrack();
+    trafo_now = 0;
+    trafo.scale = 1000.0;
+    main->loadTrack();
     main->loadModel();
     showModel = false;
     showDMCModel = false;
@@ -400,17 +405,23 @@ void ConturingWidget::initializeGL() {
     selectedLevel = 0;
 }
 
-void ConturingWidget::bindModel(Model* model, const Matrix4f& V, QVector4D color) {
+void ConturingWidget::updateTrafoModel() {
+    if (!trafo.empty() && model) {
+        model->scale /= trafo.scale;
+        model->center = (trafo[0] * model->center.homogeneous()).block<3,1>(0,0);
+    }
+}
+
+void ConturingWidget::bindModel(const Matrix4f& VM, QVector4D color) {
     program.bind();
-    Matrix4f VM = V * model->getModelMatrix();
     Matrix4f PVM = camera.projection * VM;
     program.setUniformValue("uMVPMat",qMat(PVM));
     program.setUniformValue("uNMat", qMat(VM).normalMatrix());
     program.setUniformValue("uColor", color);
 }
 
-void ConturingWidget::renderModel(Model* model, const Matrix4f &V, QVector4D color) {
-    bindModel(model, V, color);
+void ConturingWidget::renderModel(Model* model, const Matrix4f &VM, QVector4D color) {
+    bindModel(VM, color);
     model->render(program);
 }
 
@@ -433,10 +444,14 @@ void ConturingWidget::paintGL() {
 
     Matrix4f V = camera.getViewMatrix();
     if (model && showModel) {
-        renderModel(model.get(), V, QVector4D(0.75,0.75,0.75,1.0));
+        Matrix4f VM = V * model->getModelMatrix();
+        if (!trafo.empty())
+            VM *= trafo[trafo_now];
+        renderModel(model.get(), VM, QVector4D(0.75,0.75,0.75,1.0));
     }
     if (dmcModel && showDMCModel) {
-        renderModel(dmcModel.get(), V, QVector4D(1,0.75,0.0,1.0));
+        Matrix4f VM = V * dmcModel->getModelMatrix();
+        renderModel(dmcModel.get(), VM, QVector4D(1,0.75,0.0,1.0));
     }
     if (edgeIntersections && showEdgeIntesections) {
         renderDebugMesh(edgeIntersections.get(), V, true);
@@ -565,6 +580,16 @@ void ConturingWidget::keyPressEvent(QKeyEvent* event) {
         }
     }
 
+    switch (event->key()) {
+    case Qt::Key_Right: trafo_now += 1; if (trafo_now >= (int) trafo.size()) trafo_now = trafo.size()-1; break;
+    case Qt::Key_Left: trafo_now -= 1; if (trafo_now < 0) trafo_now = 0; break;
+    case Qt::Key_Up: trafo_now += 10; if (trafo_now >= (int) trafo.size()) trafo_now = trafo.size()-1; break;
+    case Qt::Key_Down: trafo_now -= 10; if (trafo_now < 0) trafo_now = 0; break;
+    case Qt::Key_PageUp: trafo_now += 1000; if (trafo_now >= (int) trafo.size()) trafo_now = trafo.size()-1; break;
+    case Qt::Key_PageDown: trafo_now -= 1000; if (trafo_now < 0) trafo_now = 0; break;
+    }
+    std::cout << trafo_now << std::endl;
+
     updateGL();
 }
 
@@ -593,6 +618,7 @@ void ConturingWidget::updateDMCMesh() {
 
 void ConturingWidget::createDMCMesh() {
     main->statusBar()->showMessage("create DMC Mesh...");
+    std::cout << "create DMC Mesh..." << std::endl;
     aligned_vector3f positions;
     vector<uint> indices;
     DMC->createMesh(positions, indices);
@@ -602,38 +628,61 @@ void ConturingWidget::createDMCMesh() {
     main->statusBar()->showMessage(("Done. "
                                    + to_string(positions.size()) + " Vertices, "
                                    + to_string(indices.size()/3) + " Triangles").c_str());
+    std::cout << ("Done. "
+                  + to_string(positions.size()) + " Vertices, "
+                  + to_string(indices.size()/3) + " Triangles").c_str() << std::endl;
+}
+
+void ConturingWidget::scanModel(const QMatrix4x4& P, const QMatrix4x4& V, const Matrix4f& M) {
+    QMatrix4x4 PV = P * V;
+    if (trafo.empty()) {
+        QMatrix4x4 qM = qMat(M);
+        programScan.setUniformValue("uMVPMat", PV * qM);
+        programScan.setUniformValue("uNMat", qM.normalMatrix());
+        model->render(programScan);
+    } else {
+        for (uint i = 0; i < trafo.size(); ++i) {
+            Matrix4f M_trafo = M * trafo[i];
+            QMatrix4x4 qM_trafo = qMat(M_trafo);
+            programScan.setUniformValue("uMVPMat", PV * qM_trafo);
+            programScan.setUniformValue("uNMat", qM_trafo.normalMatrix());
+            model->render(programScan);
+        }
+    }
 }
 
 void ConturingWidget::dmc() {
 
-    main->statusBar()->showMessage("scan model...");
     CompressedHermiteScanner* scan = new CompressedHermiteScanner(FRONT_AND_BACK_XYZ, res, voxelGridRadius, programScan);
     QMatrix4x4 V;
     Matrix4f modelMat = model->getModelMatrix();
-    QMatrix4x4 M = qMat(modelMat);
 
     scan->begin(FRONT_AND_BACK_FACES_X, V);
-    QMatrix4x4 VM = V * M;
-    programScan.setUniformValue("uMVPMat", scan->projection * VM);
-    programScan.setUniformValue("uNMat", M.normalMatrix());
-    model->render(programScan);
+    main->statusBar()->showMessage("scan model x-axis...");
+    std::cout << "scan model x-axis..." << std::endl;
+    scanModel(scan->projection, V, modelMat);
+    std::cout << "read x-axis data from graphic memory..." << std::endl;
+    main->statusBar()->showMessage("read x-axis data from graphic memory...");
     scan->end();
 
     scan->begin(FRONT_AND_BACK_FACES_Y, V);
-    VM = V * M;
-    programScan.setUniformValue("uMVPMat", scan->projection * VM);
-    programScan.setUniformValue("uNMat", M.normalMatrix());
-    model->render(programScan);
+    main->statusBar()->showMessage("scan model y-axis...");
+    std::cout << "scan model y-axis..." << std::endl;
+    scanModel(scan->projection, V, modelMat);
+    std::cout << "read y-axis data from graphic memory..." << std::endl;
+    main->statusBar()->showMessage("read y-axis data from graphic memory...");
     scan->end();
 
     scan->begin(FRONT_AND_BACK_FACES_Z, V);
-    VM = V * M;
-    programScan.setUniformValue("uMVPMat", scan->projection * VM);
-    programScan.setUniformValue("uNMat", M.normalMatrix());
-    model->render(programScan);
+    main->statusBar()->showMessage("scan model z-axis...");
+    std::cout << "scan model z-axis..." << std::endl;
+    scanModel(scan->projection, V, modelMat);
+    std::cout << "read z-axis data from graphic memory..." << std::endl;
+    main->statusBar()->showMessage("read z-axis data from graphic memory...");
     scan->end();
 
     main->statusBar()->showMessage("create sampler...");
+    std::cout << "create sampler..." << std::endl;
     CompressedHermiteSampler* sampler = new CompressedHermiteSampler(scan->data.get());
 
     aligned_vector3f positions, colors;
@@ -658,11 +707,14 @@ void ConturingWidget::dmc() {
 
     DMC = unique_ptr<DualMarchingCubes>(new DualMarchingCubes(sampler));
     main->statusBar()->showMessage("create octree...");
+    std::cout << "create octree..." << std::endl;
     DMC->createOctree();
     main->statusBar()->showMessage("create vertex tree...");
+    std::cout << "create vertex tree..." << std::endl;
     DMC->createVertexTree();
 
     main->statusBar()->showMessage(("simplify (t = " + to_string(errorThreshold) + ")...").c_str());
+    std::cout << ("simplify (t = " + to_string(errorThreshold) + ")...").c_str() << std::endl;
     DMC->collapse(errorThreshold);
 /*
     main->statusBar()->showMessage("generate vertex model...");

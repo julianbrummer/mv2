@@ -85,4 +85,23 @@ public:
 
 };
 
+class Trafo {
+public:
+    vector<Matrix4f> M;
+    float scale;
+
+    Trafo() : scale(1.0) {}
+
+    uint size() {
+        return M.size();
+    }
+    bool empty() {
+        return M.empty();
+    }
+
+    Matrix4f& operator [](uint i) {
+        return M[i];
+    }
+};
+
 #endif // MODEL_H

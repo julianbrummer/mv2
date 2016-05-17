@@ -246,10 +246,10 @@ uint CompressedHermiteSampler::compressedEdgeData(uint orientation, const Index&
     to[orientation] += 1;
 
     uint compressedData = 0;
-                                    //    ff
+                                  //    ff
     if (!sign(from) && sign(to))  // O--|--X
         compressedData = data->frontface_cut(orientation, from);
-                                         //    bf
+                                       //    bf
     else if (sign(from) && !sign(to))  // X--|--O
         compressedData = data->backface_cut(orientation, from);
 
