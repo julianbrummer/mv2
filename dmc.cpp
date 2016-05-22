@@ -82,16 +82,6 @@ bool compareSurfaceIndex(shared_ptr<VertexNode> v1, shared_ptr<VertexNode> v2) {
     return v1->surfaceIndex < v2->surfaceIndex;
 }
 
-bool DMCOctreeCell::isHomogeneous() const {
-    if (hasChildren()) {
-        for (int i = 0; i < 8; ++i)
-            if (!child(i)->isHomogeneous())
-                return false;
-        return true;
-    }
-    return signConfig == 0 || signConfig == 255;
-}
-
 DMCOctreeNode::DMCOctreeNode(uint8_t level) : DMCOctreeCell(level)  {
     for (int i = 0; i < 8; ++i) {
         children[i] = nullptr;
@@ -121,9 +111,21 @@ void DMCOctreeNode::removeChildren() {
 
 DMCOctreeLeaf::DMCOctreeLeaf(uint8_t level) : DMCOctreeCell(level) {
     for (uint i = 0; i < 12; ++i) {
-        edgeVertices[i] = -1;
+        frontEdgeVertices[i] = -1;
+        backEdgeVertices[i] = -1;
     }
     collapsed = true;
+}
+
+VertexNode* DMCOctreeLeaf::vertexAssignedTo(uint edgeIndex, FaceType type) const {
+    int8_t vIndex = -1;
+    switch (type) {
+        case FRONT_FACE:
+            vIndex = frontEdgeVertices[edgeIndex]; break;
+        case BACK_FACE:
+            vIndex = backEdgeVertices[edgeIndex]; break;
+    }
+    return vIndex < 0? nullptr : vertices[vIndex].get();
 }
 
 void DMCVerticesBuilder::handle(const DMCOctreeCell *node, const Index &index) {
@@ -164,6 +166,40 @@ void DualMarchingCubes::assignSurface(const vector<shared_ptr<VertexNode>>& vert
     }
 }
 
+void DualMarchingCubes::clusterEdge(array<DMCOctreeCell* , 4> nodes, uint orientation, FaceType type, uint& maxSurfaceIndex,
+                                    const vector<shared_ptr<VertexNode>>& vertices) {
+    array<VertexNode*, 4> v{nullptr, nullptr, nullptr, nullptr};
+    for (uint i = 0; i < 4; ++i) {
+        uint e = edge_of_four_cells[orientation][i];
+        v[i] = nodes[i]->vertexAssignedTo(e, type);
+        if (!v[i]) // this may happen since the method is also called for O----O edges
+            return;
+        // folow parent pointers up the vertex tree
+        while (!v[i]->parent.expired())
+            v[i] = v[i]->parent.lock().get();
+    }
+
+    // cluster vertices connected by surfaces dual to this edge
+    int surfaceIndex = -1;
+    for (uint i = 0; i < 4; ++i) {
+        if (v[i]->surfaceIndex != -1) {
+            if (surfaceIndex == -1)
+                surfaceIndex = v[i]->surfaceIndex;
+            else if (surfaceIndex != v[i]->surfaceIndex) {
+                assignSurface(vertices, v[i]->surfaceIndex, surfaceIndex);
+            }
+        }
+    }
+
+    if (surfaceIndex == -1)
+        surfaceIndex = maxSurfaceIndex++;
+
+    for (uint i = 0; i < 4; ++i) {
+        if (v[i]->surfaceIndex == -1)
+            v[i]->surfaceIndex = surfaceIndex;
+    }
+}
+
 void DualMarchingCubes::clusterEdge(array<DMCOctreeCell* , 4> nodes, uint orientation,
                                     uint& maxSurfaceIndex, const vector<shared_ptr<VertexNode>>& vertices) {
 
@@ -179,41 +215,18 @@ void DualMarchingCubes::clusterEdge(array<DMCOctreeCell* , 4> nodes, uint orient
 
     } else if (!nodes[0]->hasChildren() && !nodes[1]->hasChildren() && !nodes[2]->hasChildren() && !nodes[3]->hasChildren()) {
 
-        uint edgeIndex = edge_of_four_cells[orientation][0];
-        if (!nodes[0]->signChange(edgeIndex))
-            return;
-
-
-        array<VertexNode*, 4> v{nullptr, nullptr, nullptr, nullptr};
-        for (uint i = 0; i < 4; ++i) {
-            // get vertices assigned to this edge
-            uint edgeIndex = edge_of_four_cells[orientation][i];
-            v[i] = nodes[i]->vertexAssignedTo(edgeIndex);
-            assert(v[i]);
-            // folow parent pointers up the vertex tree
-            while (!v[i]->parent.expired())
-                v[i] = v[i]->parent.lock().get();
+        uint e = edge_of_four_cells[orientation][0];
+        bool s0 = nodes[0]->sign(edge_corners[e][0]);
+        bool s1 = nodes[0]->sign(edge_corners[e][1]);
+        if (!s0 && s1)
+            clusterEdge(nodes, orientation, FRONT_FACE, maxSurfaceIndex, vertices);
+        else if (s0 && !s1)
+            clusterEdge(nodes, orientation, BACK_FACE, maxSurfaceIndex, vertices);
+        else if (!s0 && !s1) {
+            clusterEdge(nodes, orientation, FRONT_FACE, maxSurfaceIndex, vertices);
+            clusterEdge(nodes, orientation, BACK_FACE, maxSurfaceIndex, vertices);
         }
 
-        // cluster vertices connected by surfaces dual to this edge
-        int surfaceIndex = -1;
-        for (uint i = 0; i < 4; ++i) {
-            if (v[i]->surfaceIndex != -1) {
-                if (surfaceIndex == -1)
-                    surfaceIndex = v[i]->surfaceIndex;
-                else if (surfaceIndex != v[i]->surfaceIndex) {
-                    assignSurface(vertices, v[i]->surfaceIndex, surfaceIndex);
-                }
-            }
-        }
-
-        if (surfaceIndex == -1)
-            surfaceIndex = maxSurfaceIndex++;
-
-        for (uint i = 0; i < 4; ++i) {
-            if (v[i]->surfaceIndex == -1)
-                v[i]->surfaceIndex = surfaceIndex;
-        }
     }
 
 }
@@ -412,6 +425,40 @@ void DualMarchingCubes::triangulate(const vector<VertexNode*> v, bool front_face
     }
 }
 
+void DualMarchingCubes::edgeProc(array<DMCOctreeCell* , 4> nodes, uint orientation, FaceType type,
+                                 aligned_vector3f& positions, vector<uint>& indices) {
+
+    array<VertexNode*, 4> vNodes{nullptr, nullptr, nullptr, nullptr};
+    for (uint i = 0; i < 4; ++i) {
+
+        // get vertices assigned to this edge
+        vNodes[i] = nodes[i]->vertexAssignedTo(edge_of_four_cells[orientation][i], type);
+        if (!vNodes[i]) // this may happen since the method is also called for O----O edges
+            return;
+        // folow parent pointers up the vertex tree to the last vertex marked as collapsable
+        while (!vNodes[i]->parent.expired() && vNodes[i]->parent.lock()->collapsable)
+            vNodes[i] = vNodes[i]->parent.lock().get();
+    }
+    vector<VertexNode*> v = makeUnique(vNodes); // remove doubles (e.g vNodes have same ancestor)
+
+    switch (type) {
+        case FRONT_FACE:
+        if (v.size() == 4) { // quad
+            triangulate(v, true, orientation, positions, indices);
+        } else if (v.size() == 3) { // triangle
+            triangle(v, {0,1,2}, positions, indices);
+        }
+        break;
+        case BACK_FACE:
+        if (v.size() == 4) { // quad
+            triangulate(v, false, orientation, positions, indices);
+        } else if (v.size() == 3) { // triangle
+            triangle(v, {0,2,1}, positions, indices);
+        }
+        break;
+    }
+}
+
 void DualMarchingCubes::edgeProc(array<DMCOctreeCell* , 4> nodes, uint orientation, aligned_vector3f& positions, vector<uint>& indices) {
 
     if (nodes[0]->hasChildren() && nodes[1]->hasChildren() && nodes[2]->hasChildren() && nodes[3]->hasChildren()) {
@@ -426,35 +473,16 @@ void DualMarchingCubes::edgeProc(array<DMCOctreeCell* , 4> nodes, uint orientati
 
     } else if (!nodes[0]->hasChildren() && !nodes[1]->hasChildren() && !nodes[2]->hasChildren() && !nodes[3]->hasChildren()) {
 
-        uint edgeIndex = edge_of_four_cells[orientation][0];
-        if (!nodes[0]->signChange(edgeIndex))
-            return;
-
-
-        array<VertexNode*, 4> vNodes{nullptr, nullptr, nullptr, nullptr};
-        for (uint i = 0; i < 4; ++i) {
-            // get vertices assigned to this edge
-            uint edgeIndex = edge_of_four_cells[orientation][i];
-            vNodes[i] = nodes[i]->vertexAssignedTo(edgeIndex);
-            assert(vNodes[i]);
-            // folow parent pointers up the vertex tree to the last vertex marked as collapsable
-            while (!vNodes[i]->parent.expired() && vNodes[i]->parent.lock()->collapsable)
-                vNodes[i] = vNodes[i]->parent.lock().get();
-        }
-        vector<VertexNode*> v = makeUnique(vNodes); // remove doubles (e.g vNodes have same ancestor)
-
-        if (nodes[0]->frontface(edgeIndex)) {
-            if (v.size() == 4) { // quad
-                triangulate(v, true, orientation, positions, indices);
-            } else if (v.size() == 3) { // triangle
-                triangle(v, {0,1,2}, positions, indices);
-            }
-        } else if (nodes[0]->backface(edgeIndex)) {
-            if (v.size() == 4) { // quad
-                triangulate(v, false, orientation, positions, indices);
-            } else if (v.size() == 3) { // triangle
-                triangle(v, {0,2,1}, positions, indices);
-            }
+        uint e = edge_of_four_cells[orientation][0];
+        bool s0 = nodes[0]->sign(edge_corners[e][0]);
+        bool s1 = nodes[0]->sign(edge_corners[e][1]);
+        if (!s0 && s1)
+            edgeProc(nodes, orientation, FRONT_FACE, positions, indices);
+        else if (s0 && !s1)
+            edgeProc(nodes, orientation, BACK_FACE, positions, indices);
+        else if (!s0 && !s1) {
+            edgeProc(nodes, orientation, FRONT_FACE, positions, indices);
+            edgeProc(nodes, orientation, BACK_FACE, positions, indices);
         }
     }
 
@@ -532,70 +560,160 @@ void DualMarchingCubes::generateVertex(const Index& cell_index, uint8_t level, Q
     Vector3d cell_origin(cell_index.x,cell_index.y, cell_index.z);
     cell_origin /= sampler->res;
     double cell_size = cellSize(level);
-    //if (inCell(vQEF, cell_origin, cell_size, 0)) {
+    if (inCell(vQEF, cell_origin, cell_size, cell_size)) {
         v = vQEF.cast<float>();
-    //} else
-    //    v = qef.m;
+    } else
+        v = qef.m;
 
     //TODO better vertex placement
 }
 
+void DualMarchingCubes::addToQEF(const Index& edge, uint orientation, float d,
+                                 const Vector3f& n, QEF& qef) const {
+    Vector3f p = Vector3f(edge.x,edge.y,edge.z);
+    p[orientation] += d;
+    p /= sampler->res;
+    qef.add(n, p);
+    qef.m += p;
+}
 
-void DualMarchingCubes::initQEF(const int edges[], uint count, const Index& cell_index, QEF& qef) const {
+void DualMarchingCubes::initQEF(const int8_t frontEdges[], const int8_t backEdges[], uint frontCount,
+                                uint backCount, const Index& cell_index, QEF& qef) const {
+    Vector3f n;
+    n.setZero(3);
+    float d = 0.0;
+    for (uint i = 0; i < frontCount; ++i) {
+        int e = frontEdges[i];
+        Index edge = cell_index + corner_delta[edge_corners[e][0]];
+        uint orientation = edge_orientation[e];
+        assert(sampler->frontEdgeInfo(orientation, edge, d, n));
+        addToQEF(edge, orientation, d, n, qef);
+    }
+    for (uint i = 0; i < backCount; ++i) {
+        int e = backEdges[i];
+        Index edge = cell_index + corner_delta[edge_corners[e][0]];
+        uint orientation = edge_orientation[e];
+        assert(sampler->backEdgeInfo(orientation, edge, d, n));
+        addToQEF(edge, orientation, d, n, qef);
+    }
+    qef.m /= frontCount + backCount;
+}
+
+void DualMarchingCubes::createVertexNodesFromEdges(DMCOctreeLeaf& leaf, const Index& leaf_index) {
+    if (leaf_index.x == 4 && leaf_index.y == 4 && leaf_index.z == 5)
+        cout << "a";
+    int edgeConfig = sampler->edgeConfig(leaf_index);
+    int8_t frontEdges[8] = {-1,-1,-1,-1,-1,-1,-1,-1};
+    int8_t backEdges[8] = {-1,-1,-1,-1,-1,-1,-1,-1};
+    uint frontCount = 0;
+    uint backCount = 0;
+    bool inside = false; // the connected corners have an inside sign
+    for (int i = 0; i < 16; ++i) {
+        int corner = cornerTable[edgeConfig][i];
+        if (corner < 0) {
+            if (!inside) {
+                VertexNode* vNode = new VertexNode();
+                initQEF(frontEdges, backEdges, frontCount, backCount, leaf_index, vNode->qef);
+                generateVertex(leaf_index, sampler->leaf_level, vNode->qef, vNode->v);
+                vNode->computeError();
+                vNode->collapsable = true; // a leaf node is always collapsable
+                // assign vertex index to edges
+                for (uint e = 0; e < frontCount; ++e)
+                    leaf.frontEdgeVertices[frontEdges[e]] = leaf.vertices.size();
+                for (uint e = 0; e < backCount; ++e)
+                    leaf.backEdgeVertices[backEdges[e]] = leaf.vertices.size();
+                leaf.vertices.push_back(shared_ptr<VertexNode>(vNode));
+            }
+            frontCount = 0;
+            backCount = 0;
+            inside = false;
+            if (corner == -2)
+                break;
+        } else if (!inside) {
+            if (leaf.sign(corner)) {// inside (only connect over outside corners)
+                inside = true;
+                continue;
+            }
+            for (int j = 0; j < 3; ++j) { // 3 adjacent edges per corner
+                int e = corner_edges[corner][j];
+                uint frontCorner = edge_corners[e][0]; // corner associated with front cut of edge
+                uint orientation = edge_orientation[e];
+                Index edge = leaf_index + corner_delta[frontCorner];
+                // has asociated edge cut?
+                if (corner == frontCorner && sampler->hasFrontCut(orientation,edge))
+                    frontEdges[frontCount++] = e;
+                else if (corner != frontCorner && sampler->hasBackCut(orientation,edge))
+                    backEdges[backCount++] = e;
+
+            }
+        }
+    }
+}
+
+
+void DualMarchingCubes::initQEF(const int8_t edges[], uint count, const Index& cell_index, QEF& qef) const {
     for (uint i = 0; i < count; ++i) {
         int e = edges[i];
-        Index edge = cell_index + edge_origin[e];
+        Index edge = cell_index + corner_delta[edge_corners[e][0]];
         Vector3f n;
         float d;
         uint orientation = edge_orientation[e];
         assert(sampler->intersectsEdge(orientation, edge, d, n));
-        Vector3f p = Vector3f(edge.x,edge.y,edge.z);
-        p[orientation] += d;
-        p /= sampler->res;
-        qef.add(n, p);
-        qef.m += p;
+        addToQEF(edge, orientation, d, n, qef);
     }
     qef.m /= count;
 }
 
-void DualMarchingCubes::createVertexNodes(DMCOctreeLeaf& leaf, const Index& leaf_index) {
+void DualMarchingCubes::createVertexNodesFromSigns(DMCOctreeLeaf& leaf, const Index& leaf_index) {
     uint vCount = vertexCount[leaf.signConfig];
     if (vCount == 0)
         return;
-    uint eIndex = 0;
-    int vEdges[8] = {-1,-1,-1,-1,-1,-1,-1,-1};
+    uint count = 0;
+    int8_t vEdges[8] = {-1,-1,-1,-1,-1,-1,-1,-1};
     for (uint i = 0; i < 16; ++i) {
         int edge = edgeTable[leaf.signConfig][i];
         if (edge < 0) {
             VertexNode* vNode = new VertexNode();
-            initQEF(vEdges, eIndex, leaf_index, vNode->qef);
+            initQEF(vEdges, count, leaf_index, vNode->qef);
             generateVertex(leaf_index, sampler->leaf_level, vNode->qef, vNode->v);
             vNode->computeError();
             vNode->collapsable = true; // a leaf node is always collapsable
             // assign vertex index to edges
-            for (uint e = 0; e < eIndex; ++e) {
-                leaf.edgeVertices[vEdges[e]] = leaf.vertices.size();
+            for (uint e = 0; e < count; ++e) {
+                if (leaf.frontface(vEdges[e]))
+                    leaf.frontEdgeVertices[vEdges[e]] = leaf.vertices.size();
+                else
+                    leaf.backEdgeVertices[vEdges[e]] = leaf.vertices.size();
             }
             leaf.vertices.push_back(shared_ptr<VertexNode>(vNode));
-            eIndex = 0;
+            count = 0;
             if (edge == -2)
                 break;
         } else
-            vEdges[eIndex++] = edge;
+            vEdges[count++] = edge;
     }
 }
 
-void DualMarchingCubes::createOctreeNodes(DMCOctreeNode& parent, uint parent_size, const Index& parent_index) {
-    uint child_size = parent_size/2;
+void DualMarchingCubes::createVertexNodes(DMCOctreeLeaf &leaf, const Index &leaf_index) {
+    //if (sampler->hasComplexEdge(leaf_index))
+        createVertexNodesFromEdges(leaf, leaf_index);
+    //else
+    //    createVertexNodesFromSigns(leaf, leaf_index);
+}
 
+bool DualMarchingCubes::createOctreeNodes(DMCOctreeNode& parent, uint parent_size, const Index& parent_index) {
+    uint child_size = parent_size/2;
+    bool isEmpty = true; // true if every child cell has an inside sign config or no edge cut
     if (parent.level == sampler->leaf_level-1) {
         // create leaves
         for (int i = 0; i < 8; ++i) {
             Index child_index = parent_index + child_size*child_origin[i];
             unique_ptr<DMCOctreeLeaf> child(new DMCOctreeLeaf(parent.level+1));
             sampler->applySigns(*child, child_index);
-            if (!child->isHomogeneous())
+            if (sampler->hasCut(child_index) && !child->in()) {
                 createVertexNodes(*child, child_index);
+                isEmpty = false;
+            }
             parent.children[i] = move(child);
         }
     } else {
@@ -605,13 +723,14 @@ void DualMarchingCubes::createOctreeNodes(DMCOctreeNode& parent, uint parent_siz
 //                std::cout << i << std::endl;
             Index child_index = parent_index + child_size*child_origin[i];
             unique_ptr<DMCOctreeNode> child(new DMCOctreeNode(parent.level+1));
-            createOctreeNodes(*child, child_size, child_index);
+            isEmpty &= createOctreeNodes(*child, child_size, child_index);
             sampler->applySigns(*child, child_index);
             parent.children[i] = move(child);
         }
     }
-    if (parent.isHomogeneous())
+    if (isEmpty)
         parent.removeChildren();
+    return isEmpty;
 }
 
 void DualMarchingCubes::createOctree() {

@@ -113,9 +113,9 @@ void CompressedHermiteScanner::end() {
     glFinish();
     glFlush();
     // unbind images
-    for (uint i = 0; i < textures.size(); ++i) {
-        glActiveTexture(GL_TEXTURE0+i);
-        glBindImageTexture(i, 0, 0, GL_TRUE, 0, GL_READ_WRITE, GL_R32UI);
+    for (uint t = 0; t < textures.size(); ++t) {
+        glActiveTexture(GL_TEXTURE0+t);
+        glBindImageTexture(t, 0, 0, GL_TRUE, 0, GL_READ_WRITE, GL_R32UI);
     }
     vector<GLuint> texData;
     ulong dataSize = size*size*res;
@@ -273,5 +273,13 @@ bool CompressedHermiteSampler::intersectsEdge(uint orientation, const Index& fro
 
 bool CompressedHermiteSampler::intersectsEdge(uint orientation, const Index &from, float& d) const {
     return CompressedHermiteData::unpack(compressedEdgeData(orientation, from), d);
+}
+
+bool CompressedHermiteSampler::hasFrontCut(uint orientation, const Index &from) const {
+    return data->frontface_cut(orientation, from) > 0;
+}
+
+bool CompressedHermiteSampler::hasBackCut(uint orientation, const Index &from) const {
+    return data->backface_cut(orientation, from) > 0;
 }
 

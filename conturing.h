@@ -51,6 +51,24 @@ const uint edge_corners[12][2] = {
     {0,4},{1,5},{2,6},{3,7}
 };
 
+// edges connected to corner [corner][3 edges]
+const uint corner_edges[8][3] = {
+    {0,8,3},
+    {0,9,1},
+    {2,10,1},
+    {2,11,3},
+    {4,8,7},
+    {4,9,5},
+    {6,10,5},
+    {6,11,7}
+};
+
+
+// edge orientations of a cell (0=x, 1=y, 2=z)
+const uint edge_orientation[12] = {
+    0,2,0,2,0,2,0,2,1,1,1,1
+};
+
 // power_of_2
 const uint pow2Table[12] = {
     1,2,4,8,16,32,64,128,256,512,1024,2048
@@ -126,10 +144,13 @@ public:
     uint8_t signConfig;
 
     OctreeNode(uint8_t level) : level(level), signConfig(0) {}
-    bool sign(uint i);
-    bool signChange(uint e);
-    bool frontface(uint e);
-    bool backface(uint e);
+    bool sign(uint i) const;
+    bool signChange(uint e) const;
+    bool frontface(uint e) const;
+    bool backface(uint e) const;
+    bool homogeneousSigns() const;
+    bool in() const;
+    bool out() const;
 };
 
 class Sampler {
@@ -164,7 +185,14 @@ public:
     virtual bool backEdgeInfo(uint orientation, const Index& from, float& d, Vector3f& n) const = 0;
     virtual bool intersectsEdge(uint orientation, const Index& from, float& d) const = 0;
     virtual bool intersectsEdge(uint orientation, const Index& from, float& d, Vector3f& n) const = 0;
+    virtual bool hasFrontCut(uint orientation, const Index &from) const = 0;
+    virtual bool hasBackCut(uint orientation, const Index &from) const = 0;
 
+    bool isComplex(uint orientation, const Index &from) const;
+    bool hasComplexEdge(const Index &cellOrigin) const;
+    bool hasCut(const Index &cellOrigin) const;
+    bool hasCut(uint orientation, const Index &from) const;
+    int edgeConfig(const Index &cell_index) const;
     void edgeIntersections(float voxelGridRadius, aligned_vector3f &positions, aligned_vector3f &colors);
 };
 

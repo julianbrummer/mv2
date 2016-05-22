@@ -75,6 +75,8 @@ public:
     bool backEdgeInfo(uint orientation, const Index& from, float& d, Vector3f& n) const override;
     bool intersectsEdge(uint orientation, const Index &from, float& d, Vector3f& n) const override;
     bool intersectsEdge(uint orientation, const Index &from, float& d) const override;
+    bool hasFrontCut(uint orientation, const Index &from) const override;
+    bool hasBackCut(uint orientation, const Index &from) const override;
 
 };
 

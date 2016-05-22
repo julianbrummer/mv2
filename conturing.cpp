@@ -82,20 +82,32 @@ Index Index::shiftZ(int shift) const {
     return Index(x,y,z+shift);
 }
 
-bool OctreeNode::sign(uint i) {
+bool OctreeNode::sign(uint i) const {
     return (signConfig & (1 << i)) > 0;
 }
 
-bool OctreeNode::signChange(uint e) {
+bool OctreeNode::signChange(uint e) const {
     return sign(edge_corners[e][0]) != sign(edge_corners[e][1]);
 }
 
-bool OctreeNode::frontface(uint e) {
+bool OctreeNode::frontface(uint e) const {
     return !sign(edge_corners[e][0]) && sign(edge_corners[e][1]);
 }
 
-bool OctreeNode::backface(uint e) {
+bool OctreeNode::backface(uint e) const {
     return sign(edge_corners[e][0]) && !sign(edge_corners[e][1]);
+}
+
+bool OctreeNode::homogeneousSigns() const {
+    return in() || out();
+}
+
+bool OctreeNode::in() const {
+    return signConfig == 255;
+}
+
+bool OctreeNode::out() const {
+    return signConfig == 0;
 }
 
 const uint Sampler::MIN_RESOULTION = 2;
@@ -171,6 +183,44 @@ void Sampler::outside(float voxelGridRadius, aligned_vector3f &positions) {
             }
         }
     }
+}
+
+bool HermiteDataSampler::isComplex(uint orientation, const Index &from) const {
+    Index to = from;
+    to[orientation] += 1;
+    return !sign(from) && !sign(to) && hasFrontCut(orientation, from) && hasBackCut(orientation, from);
+}
+
+bool HermiteDataSampler::hasComplexEdge(const Index &cellOrigin) const {
+    for (int i = 0; i < 12; ++i) {
+        if (isComplex(edge_orientation[i], cellOrigin + corner_delta[edge_corners[i][0]]))
+            return true;
+    }
+    return false;
+}
+
+bool HermiteDataSampler::hasCut(const Index &cellOrigin) const {
+    for (int i = 0; i < 12; ++i) {
+        if (hasCut(edge_orientation[i], cellOrigin + corner_delta[edge_corners[i][0]]))
+            return true;
+    }
+    return false;
+}
+
+bool HermiteDataSampler::hasCut(uint orientation, const Index &from) const {
+    return hasFrontCut(orientation, from) || hasBackCut(orientation, from);
+}
+
+int HermiteDataSampler::edgeConfig(const Index &cell_index) const {
+    Index e;
+    int edgeConfig = 0;
+    for (int i = 0; i < 12; ++i) {
+        e = cell_index + corner_delta[edge_corners[i][0]];
+        if (hasCut(edge_orientation[i], e)) {
+            edgeConfig |= 1 << i;
+        }
+    }
+    return edgeConfig;
 }
 
 void HermiteDataSampler::edgeIntersections(float voxelGridRadius, aligned_vector3f& positions, aligned_vector3f& colors) {

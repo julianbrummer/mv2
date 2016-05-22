@@ -392,7 +392,7 @@ void ConturingWidget::initializeGL() {
 
     trafo_now = 0;
     trafo.scale = 1000.0;
-    main->loadTrack();
+    //main->loadTrack();
     main->loadModel();
     showModel = false;
     showDMCModel = false;
@@ -578,6 +578,7 @@ void ConturingWidget::keyPressEvent(QKeyEvent* event) {
         case Qt::Key_7: if (selectedCell.y > 0) selectedCell = selectedCell.shiftY(-1); break;
         case Qt::Key_9: if (selectedCell.y < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftY(1); break;
         }
+        cout << selectedCell.x << " " << selectedCell.y <<  " " << selectedCell.z << endl;
     }
 
     switch (event->key()) {
@@ -690,13 +691,13 @@ void ConturingWidget::dmc() {
 /*
     main->statusBar()->showMessage("generate edge intersection model");
     std::cout << "generate edge intersection model" << std::endl;
-    sampler.edgeIntersections(voxelGridRadius, positions, colors);
+    sampler->edgeIntersections(voxelGridRadius, positions, colors);
     edgeIntersections = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
 
     std::cout << "generate in grid model" << std::endl;
     main->statusBar()->showMessage("generate in grid model");
     positions.clear();
-    sampler.inside(voxelGridRadius, positions);
+    sampler->inside(voxelGridRadius, positions);
     inGridPoints = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
 
     std::cout << "generate out grid model" << std::endl;
@@ -718,6 +719,7 @@ void ConturingWidget::dmc() {
     DMC->collapse(errorThreshold);
 /*
     main->statusBar()->showMessage("generate vertex model...");
+    std::cout << "generate vertex model..." << std::endl;
     positions.clear();
     colors.clear();
     DMC->vertices(positions, colors, v_offset, v_count);
