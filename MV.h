@@ -54,8 +54,12 @@ public slots:
     void toggleViewOutGridPoints() {showOutGridPoints = !showOutGridPoints; updateGL();}
     void toggleViewDMCVertices() {showDMCVertices = !showDMCVertices; updateGL();}
     void toggleViewDMCModel() {showDMCModel = !showDMCModel; updateGL();}
-    void toggleViewCells() {showCells = !showCells; updateGL();}
-    void toggleViewCellLevel() {showSingleCell = !showSingleCell; updateGL();}
+    void toggleViewCells() {
+        showCells = !showCells;
+        if(!cells)
+            createCellMesh();
+        updateGL();
+    }
     void increaseSelectedLevel() {
         if (selectedLevel < levels-1) {
             selectedLevel = selectedLevel+1;
@@ -71,7 +75,7 @@ public slots:
         updateGL();
     }
     void centerCamera() {
-        if (showSingleCell) {
+        if (showCells) {
             Vector3f cell_center(selectedCell.x+0.5, selectedCell.y+0.5, selectedCell.z+0.5);
             camera.center = origin+cell_center*2*cellGridRadius/pow2(selectedLevel);
             camera.position = camera.center - camera.forwd()*zoom;
@@ -94,7 +98,7 @@ public:
     static const float CAMERA_SCROLL_FACTOR;
     static const float MIN_ERROR_THRESHOLD;
     static const float MAX_ERROR_THRESHOLD;
-    static const int DEFAULT_RESOLUTION = 256;
+    static const int DEFAULT_RESOLUTION = 512;
     static const int MAX_RESOLUTION = 512;
 
     ConturingWidget(CGMainWindow*,QWidget*);
@@ -114,7 +118,7 @@ public:
 
     //bool wireframe;
     bool showModel, showEdgeIntesections, showInGridPoints, showOutGridPoints,
-         showDMCModel, showDMCVertices, showCells, showSingleCell;
+         showDMCModel, showDMCVertices, showCells;
 
     uint res;
     float errorThreshold;
@@ -144,6 +148,7 @@ private:
     void bindDebugMesh(Model* model, const Matrix4f &V, bool useVertexColor = false, QVector4D color = QVector4D(1,1,1,1));
     void renderDebugMesh(Model* model, const Matrix4f &V, bool useVertexColor = false, QVector4D color = QVector4D(1,1,1,1));
     void createDMCMesh();
+    void createCellMesh();
     void scanModel(const QMatrix4x4& P, const QMatrix4x4& V, const Matrix4f &M);
 
     QGLShaderProgram program, programColor;

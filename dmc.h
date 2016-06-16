@@ -4578,10 +4578,12 @@ private:
 // init octree
     bool inCell(Vector3d& pos, const Vector3d& cellOrigin, double size, double eps) const;
     void addToQEF(const Index& edge, uint orientation, float d, const Vector3f& n, QEF& qef) const;
+    void initQEF(const vector<int>& edges, const Index& cell_index, QEF& qef) const;
     void initQEF(const int8_t frontEdges[], const int8_t backEdges[], uint frontCount,
                  uint backCount, const Index& cell_index, QEF& qef) const;
     void initQEF(const int8_t edges[], uint count, const Index& cell_index, QEF& qef) const;
     void generateVertex(const Index &cell_index, uint8_t level, QEF& qef, Vector3f& v);
+    void createVertexNodesFromNormalGroups(DMCOctreeLeaf &leaf, const Index &leaf_index);
     void createVertexNodesFromEdges(DMCOctreeLeaf &leaf, const Index& leaf_index);
     void createVertexNodesFromSigns(DMCOctreeLeaf &leaf, const Index& leaf_index);
     void createVertexNodes(DMCOctreeLeaf &leaf, const Index& leaf_index);

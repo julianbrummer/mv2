@@ -600,8 +600,6 @@ void DualMarchingCubes::initQEF(const int8_t frontEdges[], const int8_t backEdge
 }
 
 void DualMarchingCubes::createVertexNodesFromEdges(DMCOctreeLeaf& leaf, const Index& leaf_index) {
-    if (leaf_index.x == 4 && leaf_index.y == 4 && leaf_index.z == 5)
-        cout << "a";
     int edgeConfig = sampler->edgeConfig(leaf_index);
     int8_t frontEdges[8] = {-1,-1,-1,-1,-1,-1,-1,-1};
     int8_t backEdges[8] = {-1,-1,-1,-1,-1,-1,-1,-1};
@@ -650,6 +648,142 @@ void DualMarchingCubes::createVertexNodesFromEdges(DMCOctreeLeaf& leaf, const In
     }
 }
 
+void DualMarchingCubes::initQEF(const vector<int>& edges, const Index& cell_index, QEF& qef) const {
+    Vector3f n;
+    n.setZero(3);
+    float d = 0.0;
+    for (int e : edges) {
+        int eIndex = e > 0? e-1 : -e-1;
+        Index edge = cell_index + corner_delta[edge_corners[eIndex][0]];
+        uint orientation = edge_orientation[eIndex];
+        if (e > 0)
+            sampler->frontEdgeInfo(orientation,edge,d,n);
+        else
+            sampler->backEdgeInfo(orientation,edge,d,n);
+        addToQEF(edge, orientation, d, n, qef);
+    }
+    qef.m /= edges.size();
+}
+
+void DualMarchingCubes::createVertexNodesFromNormalGroups(DMCOctreeLeaf &leaf, const Index &leaf_index) {
+    bool frontCuts[12] = {0};
+    bool backCuts[12] = {0};
+    int cutCount = 0;
+    for (int e = 0; e < 12; ++e) {
+        Index from = leaf_index + corner_delta[edge_corners[e][0]];
+        Index to = leaf_index + corner_delta[edge_corners[e][1]];
+        if (!sampler->sign(from) && sampler->sign(to))
+            frontCuts[e] = sampler->hasFrontCut(edge_orientation[e], from);
+        else if (!sampler->sign(to) && sampler->sign(from))
+            backCuts[e] = sampler->hasBackCut(edge_orientation[e], from);
+        else if (sampler->isComplex(edge_orientation[e], from)) {
+            frontCuts[e] = true;
+            backCuts[e] = true;
+        }
+        cutCount += frontCuts[e]? 1 : 0;
+        cutCount += backCuts[e]? 1 : 0;
+    }
+
+    int edgeConfig = 0;
+    for (int i = 0; i < 12; ++i) {
+        if (frontCuts[i] || backCuts[i]) {
+            edgeConfig |= 1 << i;
+        }
+    }
+
+    while (edgeConfig != 0) {
+
+        // retrieve possible surface components
+        vector<vector<int>> components = vector<vector<int>>(1, vector<int>());
+
+        for (int i = 0; i < 16; ++i) {
+            int corner = cornerTable[edgeConfig][i];
+            if (corner < 0) {
+                if (corner == -2)
+                    break;
+                components.push_back(vector<int>());
+            } else {
+                for (int j = 0; j < 3; ++j) { // 3 adjacent edges per corner
+                    int e = corner_edges[corner][j];
+                    uint frontCorner = edge_corners[e][0]; // corner associated with front cut of edge
+                    if (corner == frontCorner) {
+                        if (frontCuts[e])
+                            components.back().push_back(e+1);
+                        else if (backCuts[e])
+                            components.back().push_back(-e-1);
+                    } else {
+                        if (backCuts[e])
+                            components.back().push_back(-e-1);
+                        else if (frontCuts[e])
+                            components.back().push_back(e+1);
+                    }
+                }
+            }
+        }
+
+        // calculate best next component
+        Vector3f n(0,0,0);
+        float d; // not needed
+        float bestDeviation = -2.0; // the best max normal deviation of all components
+        uint best = 0; // the index of the best component
+        for (uint i = 0; i < components.size(); i++) {
+            float deviation = 1.0; //the max normal deviation (dot product [-1,1], higher is better) of this component
+            vector<Vector3f> normals;
+            for (int e : components[i]) { // iterate over edge cuts of this component
+                int eIndex = e > 0? e-1 : -e-1;
+                Index edge = leaf_index + corner_delta[edge_corners[eIndex][0]];
+                if (e > 0) {
+                    if (!sampler->frontEdgeInfo(edge_orientation[eIndex],edge,d,n))
+                        std::cout << leaf_index.x << " " << leaf_index.y  <<  " "  << leaf_index.z << std::endl;
+                } else {
+                    if(!sampler->backEdgeInfo(edge_orientation[eIndex],edge,d,n)) {
+                        std::cout << leaf_index.x << " " << leaf_index.y  <<  " "  << leaf_index.z << std::endl;
+                    }
+                }
+                for (Vector3f normal : normals) {
+                    float dev = normal.transpose()*n;
+                    deviation = std::min(deviation, dev);
+                }
+                normals.push_back(n);
+
+            }
+            if (bestDeviation + 0.01 < deviation || (bestDeviation < deviation && components[best].size() < cutCount)
+                    || (bestDeviation < deviation + 0.01 && components[i].size() == cutCount)) {
+                best = i;
+                bestDeviation = deviation;
+            }
+        }
+
+        // create vertex node for the best surface component
+        VertexNode* vNode = new VertexNode();
+        initQEF(components[best], leaf_index, vNode->qef);
+        generateVertex(leaf_index, sampler->leaf_level, vNode->qef, vNode->v);
+        vNode->computeError();
+        vNode->collapsable = true; // a leaf node is always collapsable
+        // assign vertex index to edges
+        for (int e : components[best]) {
+            if (e > 0) {
+                leaf.frontEdgeVertices[e-1] = leaf.vertices.size();
+                frontCuts[e-1] = false; // remove the edge cut
+                cutCount--;
+            } else {
+                leaf.backEdgeVertices[-e-1] = leaf.vertices.size();
+                backCuts[-e-1] = false; // remove the edge cut
+                cutCount--;
+            }
+        }
+        leaf.vertices.push_back(shared_ptr<VertexNode>(vNode));
+
+        // update edge config of cell
+        edgeConfig = 0;
+        for (int e = 0; e < 12; ++e) {
+            if (frontCuts[e] || backCuts[e])
+                edgeConfig |= 1 << e;
+        }
+    }
+
+
+}
 
 void DualMarchingCubes::initQEF(const int8_t edges[], uint count, const Index& cell_index, QEF& qef) const {
     for (uint i = 0; i < count; ++i) {
@@ -694,11 +828,17 @@ void DualMarchingCubes::createVertexNodesFromSigns(DMCOctreeLeaf& leaf, const In
     }
 }
 
+
 void DualMarchingCubes::createVertexNodes(DMCOctreeLeaf &leaf, const Index &leaf_index) {
+    //if (leaf_index.x == 42 && leaf_index.y == 14 && leaf_index.z == 33)
+    //if (leaf_index.x == 68 && leaf_index.y == 39 && leaf_index.z == 30)
+    //    std::cout << "a" << std::endl;
     //if (sampler->hasComplexEdge(leaf_index))
-        createVertexNodesFromEdges(leaf, leaf_index);
+        createVertexNodesFromNormalGroups(leaf, leaf_index);
+        //createVertexNodesFromEdges(leaf, leaf_index);
     //else
-    //    createVertexNodesFromSigns(leaf, leaf_index);
+        //createVertexNodesFromSigns(leaf, leaf_index);
+
 }
 
 bool DualMarchingCubes::createOctreeNodes(DMCOctreeNode& parent, uint parent_size, const Index& parent_index) {

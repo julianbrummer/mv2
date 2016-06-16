@@ -48,7 +48,6 @@ CGMainWindow::CGMainWindow (QWidget* parent)
     view->addAction ("Vertices", ogl, SLOT(toggleViewDMCVertices()), Qt::Key_V)->setCheckable(true);
     view->addAction ("DMC Mesh", ogl, SLOT(toggleViewDMCModel()), Qt::Key_D)->setCheckable(true);
     view->addAction ("Cells", ogl, SLOT(toggleViewCells()), Qt::Key_C)->setCheckable(true);
-    view->addAction ("Toggle Level/Cell", ogl, SLOT(toggleViewCellLevel()), Qt::Key_L);
     view->addAction ("Higher Level", ogl, SLOT(decreaseSelectedLevel()), Qt::Key_Plus);
     view->addAction ("Lower Level", ogl, SLOT(increaseSelectedLevel()), Qt::Key_Minus);
     view->addAction ("Center Camera", ogl, SLOT(centerCamera()), Qt::Key_Comma);
@@ -401,7 +400,6 @@ void ConturingWidget::initializeGL() {
     showOutGridPoints = false;
     showDMCVertices = false;
     showCells = false;
-    showSingleCell = false;
     selectedLevel = 0;
 }
 
@@ -464,7 +462,7 @@ void ConturingWidget::paintGL() {
     }
     if (dmcVertices && showDMCVertices) {
         bindDebugMesh(dmcVertices.get(), V, true);
-        if (showSingleCell)
+        if (showCells)
             dmcVertices->render(programColor, v_offset[selectedLevel][selectedCell.x][selectedCell.y][selectedCell.z],
                                 v_count[selectedLevel][selectedCell.x][selectedCell.y][selectedCell.z]);
         else {
@@ -473,14 +471,12 @@ void ConturingWidget::paintGL() {
         }
     }
     if (cells && showCells) {
+        uint levelSize = pow2(selectedLevel);
+        Vector3f position((float)selectedCell.x/levelSize, (float)selectedCell.y/levelSize, (float)selectedCell.z/levelSize);
+        position *= 2*cellGridRadius;
+        cells->setPosition(origin+position);
         bindDebugMesh(cells.get(), V, false);
-        if (showSingleCell)
-            cells->render(programColor, cell_offset[selectedLevel][selectedCell.x][selectedCell.y][selectedCell.z],
-                             CELL_EDGES_VERTEX_COUNT);
-        else {
-            cells->render(programColor, cell_offset[selectedLevel][0][0][0],
-                                cell_level_count[selectedLevel]);
-        }
+        cells->render(programColor, selectedLevel*CELL_EDGES_VERTEX_COUNT, CELL_EDGES_VERTEX_COUNT);
     }
 }
 
@@ -569,17 +565,15 @@ void ConturingWidget::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void ConturingWidget::keyPressEvent(QKeyEvent* event) {
-    if (showSingleCell) {
-        switch (event->key()) {
-        case Qt::Key_8: if (selectedCell.z > 0) selectedCell = selectedCell.shiftZ(-1); break;
-        case Qt::Key_2: if (selectedCell.z < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftZ(1); break;
-        case Qt::Key_4: if (selectedCell.x > 0) selectedCell = selectedCell.shiftX(-1); break;
-        case Qt::Key_6: if (selectedCell.x < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftX(1); break;
-        case Qt::Key_7: if (selectedCell.y > 0) selectedCell = selectedCell.shiftY(-1); break;
-        case Qt::Key_9: if (selectedCell.y < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftY(1); break;
-        }
-        cout << selectedCell.x << " " << selectedCell.y <<  " " << selectedCell.z << endl;
+    switch (event->key()) {
+    case Qt::Key_8: if (selectedCell.z > 0) selectedCell = selectedCell.shiftZ(-1); break;
+    case Qt::Key_2: if (selectedCell.z < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftZ(1); break;
+    case Qt::Key_4: if (selectedCell.x > 0) selectedCell = selectedCell.shiftX(-1); break;
+    case Qt::Key_6: if (selectedCell.x < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftX(1); break;
+    case Qt::Key_7: if (selectedCell.y > 0) selectedCell = selectedCell.shiftY(-1); break;
+    case Qt::Key_9: if (selectedCell.y < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftY(1); break;
     }
+    cout << selectedCell.x << " " << selectedCell.y <<  " " << selectedCell.z << endl;
 
     switch (event->key()) {
     case Qt::Key_Right: trafo_now += 1; if (trafo_now >= (int) trafo.size()) trafo_now = trafo.size()-1; break;
@@ -596,6 +590,26 @@ void ConturingWidget::keyPressEvent(QKeyEvent* event) {
 
 void ConturingWidget::updateThreshold(float s) {
     errorThreshold = MIN_ERROR_THRESHOLD + (MAX_ERROR_THRESHOLD-MIN_ERROR_THRESHOLD)*s;
+}
+
+void ConturingWidget::createCellMesh() {
+    aligned_vector3f positions;
+    for (int l = 0; l < levels; ++l) {
+        // calculate cell corners
+        array<Vector3f, 8> corners;
+        for (int i = 0; i < 8; ++i) {
+            Index corner = corner_delta[i];
+            corners[i] = (1.0/pow2(l))*Vector3f(corner.x, corner.y, corner.z);
+        }
+        // push cell edges
+        for (int i = 0; i < 12; ++i) {
+            positions.push_back(corners[edge_corners[i][0]]);
+            positions.push_back(corners[edge_corners[i][1]]);
+        }
+    }
+    cells = unique_ptr<Model>(new Model(positions, GL_LINES, false));
+    cells->setPosition(origin);
+    cells->scale = 2*cellGridRadius;
 }
 
 void ConturingWidget::updateDMCMesh() {
@@ -688,7 +702,7 @@ void ConturingWidget::dmc() {
 
     aligned_vector3f positions, colors;
     vector<uint> indices;
-/*
+
     main->statusBar()->showMessage("generate edge intersection model");
     std::cout << "generate edge intersection model" << std::endl;
     sampler->edgeIntersections(voxelGridRadius, positions, colors);
@@ -699,7 +713,7 @@ void ConturingWidget::dmc() {
     positions.clear();
     sampler->inside(voxelGridRadius, positions);
     inGridPoints = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
-
+/*
     std::cout << "generate out grid model" << std::endl;
     positions.clear();
     sampler.outside(voxelGridRadius, positions);
@@ -717,7 +731,7 @@ void ConturingWidget::dmc() {
     main->statusBar()->showMessage(("simplify (t = " + to_string(errorThreshold) + ")...").c_str());
     std::cout << ("simplify (t = " + to_string(errorThreshold) + ")...").c_str() << std::endl;
     DMC->collapse(errorThreshold);
-/*
+
     main->statusBar()->showMessage("generate vertex model...");
     std::cout << "generate vertex model..." << std::endl;
     positions.clear();
@@ -727,22 +741,22 @@ void ConturingWidget::dmc() {
     dmcVertices->setPosition(origin);
     dmcVertices->scale = 2*cellGridRadius;
 
+/*
     main->statusBar()->showMessage("generate cell model...");
     positions.clear();
     DMC->cells(positions, cell_offset);
     cells = unique_ptr<Model>(new Model(positions, GL_LINES, false));
     cells->setPosition(origin);
     cells->scale = 2*cellGridRadius;
-
+*/
     for (int i = 0; i < levels; ++i) {
         uint levelSize = pow2(i);
-        cell_level_count[i] = levelSize*levelSize*levelSize*CELL_EDGES_VERTEX_COUNT;
         for (uint x = 0; x < levelSize; ++x)
             for (uint y = 0; y < levelSize; ++y)
                 for (uint z = 0; z < levelSize; ++z)
                     v_level_count[i] += v_count[i][x][y][z];
     }
-*/
+
     positions.clear();
     indices.clear();
     colors.clear();
