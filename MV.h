@@ -37,23 +37,25 @@ public:
     ConturingWidget *ogl;
     QLabel* t_error_label;
 
-public slots:
-    void loadModel();
-    void loadTrack();
-    void sliderValueChanged(int value);
 };
 
 
-class ConturingWidget : public QGLWidget, public QOpenGLFunctions_2_0 {
+class ConturingWidget : public QGLWidget, public QOpenGLFunctions_2_0, public Renderable {
     Q_OBJECT
 
 public slots:
+    void storeModel();
+    void loadModel();
+    void loadTrack();
+    void sliderValueChanged(int value);
+
     void toggleViewModel() {showModel = !showModel; updateGL();}
     void toggleViewEdgeIntersections() {showEdgeIntesections = !showEdgeIntesections; updateGL();}
     void toggleViewInGridPoints() {showInGridPoints = !showInGridPoints; updateGL();}
     void toggleViewOutGridPoints() {showOutGridPoints = !showOutGridPoints; updateGL();}
     void toggleViewDMCVertices() {showDMCVertices = !showDMCVertices; updateGL();}
     void toggleViewDMCModel() {showDMCModel = !showDMCModel; updateGL();}
+    void toggleWireframe() {wireframe = !wireframe; updateGL();}
     void toggleViewCells() {
         showCells = !showCells;
         if(!cells)
@@ -98,7 +100,8 @@ public:
     static const float CAMERA_SCROLL_FACTOR;
     static const float MIN_ERROR_THRESHOLD;
     static const float MAX_ERROR_THRESHOLD;
-    static const int DEFAULT_RESOLUTION = 512;
+    static const int DEFAULT_RESOLUTION = 256;
+    static const int DEFAULT_WORK_RESOLUTION = 256;
     static const int MAX_RESOLUTION = 512;
 
     ConturingWidget(CGMainWindow*,QWidget*);
@@ -110,6 +113,7 @@ public:
 
     void updateThreshold(float s);
     void updateTrafoModel();
+    void render(QGLShaderProgram& program, const QMatrix4x4& projection, const QMatrix4x4& view) const override;
 
     unique_ptr<Model> model, edgeIntersections, inGridPoints, outGridPoints, dmcVertices, dmcModel, cells;
     Camera camera;
@@ -118,7 +122,7 @@ public:
 
     //bool wireframe;
     bool showModel, showEdgeIntesections, showInGridPoints, showOutGridPoints,
-         showDMCModel, showDMCVertices, showCells;
+         showDMCModel, showDMCVertices, showCells, wireframe;
 
     uint res;
     float errorThreshold;
@@ -149,7 +153,6 @@ private:
     void renderDebugMesh(Model* model, const Matrix4f &V, bool useVertexColor = false, QVector4D color = QVector4D(1,1,1,1));
     void createDMCMesh();
     void createCellMesh();
-    void scanModel(const QMatrix4x4& P, const QMatrix4x4& V, const Matrix4f &M);
 
     QGLShaderProgram program, programColor;
     QGLShaderProgram programScan;
@@ -169,6 +172,9 @@ private:
     float voxelGridRadius, cellGridRadius;
 
     unique_ptr<DualMarchingCubes> DMC;
+    // keep to write to file
+    aligned_vector3f positions;
+    vector<uint> indices;
 
 
 };

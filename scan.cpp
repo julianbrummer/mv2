@@ -1,52 +1,131 @@
 #include "scan.h"
 #include <iostream>
 
-CompressedHermiteData::CompressedHermiteData(uint res) : res(res) {
+CompressedHermiteData::CompressedHermiteData(uint res) : res(res), size(res+1) {
     frontface_cuts.resize(3);
     backface_cuts.resize(3);
-    frontface_cuts[0] = vector_3_uint(res, vector_2_uint(res+1, vector<uint>(res+1, 0)));
-    backface_cuts[0] = vector_3_uint(res, vector_2_uint(res+1, vector<uint>(res+1, 0)));
-    frontface_cuts[1] = vector_3_uint(res+1, vector_2_uint(res, vector<uint>(res+1, 0)));
-    backface_cuts[1] = vector_3_uint(res+1, vector_2_uint(res, vector<uint>(res+1, 0)));
-    frontface_cuts[2] = vector_3_uint(res+1, vector_2_uint(res+1, vector<uint>(res, 0)));
-    backface_cuts[2] = vector_3_uint(res+1, vector_2_uint(res+1, vector<uint>(res, 0)));
+    for (int i = 0; i < 3; ++i) {
+        frontface_cuts[i].resize(size*size*size);
+        backface_cuts[i].resize(size*size*size);
+    }
 }
 
 uint CompressedHermiteData::frontface_cut(uint orientation, const Index &index) const {
-    return frontface_cuts[orientation][index.x][index.y][index.z];
+    return frontface_cuts[orientation][size*(index.y+index.z*size)+index.x];
 }
 
 uint CompressedHermiteData::backface_cut(uint orientation, const Index &index) const {
-    return backface_cuts[orientation][index.x][index.y][index.z];
+    return backface_cuts[orientation][size*(index.y+index.z*size)+index.x];
 }
 
-CompressedHermiteScanner::CompressedHermiteScanner(ScannerMode mode, uint res, float voxelGridRadius, QGLShaderProgram& scanShader)
-    : mode(mode), scanMode(NONE), res(res), size(res+1), program(&scanShader), data(new CompressedHermiteData(res)) {
+bool CompressedHermiteData::unpack(uint data, float& d) {
+    if (data == 0)
+        return false;
+    d = (float)(((data >> 24) & 255)-1)/254.0; // distance from grid point 0..1
+    return true;
+}
+
+bool CompressedHermiteData::unpack(uint data, float& d, Vector3f& n) {
+    if (data == 0)
+        return false;
+    n[2] = (data & 255)*2/255.0 - 1;
+    n[1] = ((data >> 8) & 255)*2/255.0 - 1;
+    n[0] = ((data >> 16) & 255)*2/255.0 - 1;
+    d = (float)(((data >> 24) & 255)-1)/254.0; // distance from grid point 0..1
+    return true;
+}
+
+CompressedSignData::CompressedSignData(uint res, bool defaultSign) : res(res), size(res+1), depth(res/32+1) {
+    if (defaultSign)
+        data = vector<uint>(size*size*depth, std::numeric_limits<unsigned int>::max());
+    else
+        data = vector<uint>(size*size*depth, 0);
+}
+
+bool CompressedSignData::sign(const Index &index) const {
+    return sign(index.x, index.y, index.z);
+}
+
+bool CompressedSignData::sign(uint x, uint y, uint z) const {
+    if (x > res || y > res || z > res)
+        return false;
+    uint zCoord = z/32;
+    uint offset = z - 32*zCoord;
+    uint d = data[size*(size*zCoord+y)+x];
+    d = d & pow2(offset);
+    return d > 0;
+}
+
+void CompressedSignData::setInside(uint x, uint y, uint z) {
+    if (x > res || y > res || z > res)
+        return;
+    uint zCoord = z/32;
+    uint offset = z - 32*zCoord;
+    uint d = pow2(offset);
+    data[size*(size*zCoord+y)+x] |= d;
+
+}
+void CompressedSignData::setInside(const Index &index) {
+    setInside(index.x, index.y, index.z);
+}
+
+void CompressedSignData::setOutside(uint x, uint y, uint z) {
+    uint zCoord = z/32;
+    uint offset = z - 32*zCoord;
+    data[size*(size*zCoord+y)+x] &= ~(pow2(offset));
+}
+void CompressedSignData::setOutside(const Index &index) {
+    setOutside(index.x, index.y, index.z);
+}
+
+CompressedEdgeData::CompressedEdgeData(uint res) : res(res), size(res+1), depth(res/32 + 1) {
+    cuts.resize(3);
+    for (int i = 0; i < 3; ++i) {
+        cuts[i].resize(size*size*depth);
+        cuts[i].resize(size*size*depth);
+    }
+}
+
+bool CompressedEdgeData::cut(uint orientation, uint x, uint y, uint z) const {
+    if (x > res || y > res || z >= res)
+        return false;
+    uint zCoord = z/32;
+    uint offset = z - 32*zCoord;
+    uint d = cuts[orientation][size*(size*zCoord+y)+x];
+    d = d & pow2(offset);
+    return d > 0;
+}
+
+bool CompressedEdgeData::cut(uint orientation, const Index &index) const {
+    return cut(orientation, index.x, index.y, index.z);
+}
+
+Scanner::Scanner(uint texRes, uint slices, int texCount)
+    : texRes(texRes), slices(slices) {
     initializeOpenGLFunctions();
-    textures.resize(mode);
-    glGenTextures(mode, &textures[0]);
-
-    //shift near and far plane about a half voxel cell
-    //because rays are casted from the pixel center
-    projection.ortho(-voxelGridRadius, voxelGridRadius,
-                     -voxelGridRadius, voxelGridRadius,
-                     -voxelGridRadius + voxelGridRadius/size,
-                     voxelGridRadius - voxelGridRadius/size);
+    textures.resize(texCount);
+    glGenTextures(texCount, &textures[0]);
+    projection.setToIdentity();
+    glGenFramebuffers(1, &fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferParameteri(GL_FRAMEBUFFER, GL_FRAMEBUFFER_DEFAULT_WIDTH, texRes);
+    glFramebufferParameteri(GL_FRAMEBUFFER, GL_FRAMEBUFFER_DEFAULT_HEIGHT, texRes);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
-void CompressedHermiteScanner::resetTextures() {
+void Scanner::resetTextures() {
 
-    std::vector<GLint> emptyData(size*size*res);
+    std::vector<GLint> emptyData(texRes*texRes*slices);
     glEnable(GL_TEXTURE_3D);
     for (uint i = 0; i < textures.size(); ++i) {
         glBindTexture(GL_TEXTURE_3D, textures[i]);
         glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, 0);
-        glTexImage3D(GL_TEXTURE_3D, 0, GL_R32UI, size, size, res, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, &emptyData[0]);
+        glTexImage3D(GL_TEXTURE_3D, 0, GL_R32UI, texRes, texRes, slices, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, &emptyData[0]);
     }
     glBindTexture(GL_TEXTURE_3D, 0);
 }
 
-void CompressedHermiteScanner::bindTextures() {
+void Scanner::bindTextures() {
 
     // bind textures/images
     for (uint i = 0; i < textures.size(); ++i) {
@@ -56,6 +135,65 @@ void CompressedHermiteScanner::bindTextures() {
     }
 }
 
+void Scanner::unbindImages() {
+    for (uint t = 0; t < textures.size(); ++t) {
+        glActiveTexture(GL_TEXTURE0+t);
+        glBindImageTexture(t, 0, 0, GL_TRUE, 0, GL_READ_WRITE, GL_R32UI);
+    }
+}
+
+
+void Scanner::scan(const Renderable* scene, Direction dir) {
+
+    resetTextures();
+    bindTextures();
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    QMatrix4x4 view;
+    view.setToIdentity();
+    switch (dir) {
+        case X:
+            view.rotate(90,0,1,0); break;
+        case Y:
+            view.rotate(-90,1,0,0); break;
+        case Z:
+            view.rotate(180,0,1,0); break;
+        default:
+            break;
+    }
+    program->bind();
+    for (int i = 0; i < textures.size(); ++i) {
+        program->setUniformValue(("tex["+to_string(i)+"]").c_str(), i);
+    }
+    program->setUniformValue("res", texRes-1);
+    configureProgram(dir);
+    glViewport(0,0,texRes,texRes);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_DEPTH_TEST);
+    scene->render(*program, projection, view);
+    glFinish();
+    glFlush();
+    unbindImages();
+    transferData(dir);
+    glEnable(GL_DEPTH_TEST);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+Scanner::~Scanner() {
+    glDeleteTextures(textures.size(), &textures[0]);
+    textures.clear();
+}
+
+void CompressedEdgeScanner::transferData(Direction dir) {
+    glActiveTexture(GL_TEXTURE0);
+    glGetTexImage(GL_TEXTURE_3D, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, &data->cuts[dir][0]);
+}
+
+void CompressedEdgeScanner::configureProgram(Direction dir) {
+    uint index = dir;
+    glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
+}
+
+/*
 void CompressedHermiteScanner::begin(ScanMode mode, QMatrix4x4& V) {
 
     switch (mode) {
@@ -81,11 +219,10 @@ void CompressedHermiteScanner::begin(ScanMode mode, QMatrix4x4& V) {
     resetTextures();
     bindTextures();
     program->bind();
-    /*
     for (uint i = 0; i < textures.size(); ++i) {
         program->setUniformValue(("tex["+to_string(i)+"]").c_str(), i);
     }
-*/
+
     program->setUniformValue("tex[0]", 0);
     program->setUniformValue("tex[1]", 1);
 
@@ -108,20 +245,14 @@ void CompressedHermiteScanner::begin(ScanMode mode, QMatrix4x4& V) {
 
     program->setUniformValue("res", res);
 }
+*/
+void CompressedHermiteScanner::transferData(Direction dir) {
 
-void CompressedHermiteScanner::end() {
-    glFinish();
-    glFlush();
-    // unbind images
-    for (uint t = 0; t < textures.size(); ++t) {
-        glActiveTexture(GL_TEXTURE0+t);
-        glBindImageTexture(t, 0, 0, GL_TRUE, 0, GL_READ_WRITE, GL_R32UI);
-    }
-    vector<GLuint> texData;
-    ulong dataSize = size*size*res;
-    texData.resize(dataSize);
     glActiveTexture(GL_TEXTURE0);
-    glGetTexImage(GL_TEXTURE_3D, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, &texData[0]);
+    glGetTexImage(GL_TEXTURE_3D, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, &data->frontface_cuts[dir][0]);
+    glActiveTexture(GL_TEXTURE1);
+    glGetTexImage(GL_TEXTURE_3D, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, &data->backface_cuts[dir][0]);
+    /*
     ulong i = 0;
     switch (scanMode) {
         case FRONT_FACES_X: case FRONT_AND_BACK_FACES_X:
@@ -146,12 +277,7 @@ void CompressedHermiteScanner::end() {
             break;
     }
 
-    if (mode == FRONT_AND_BACK_XYZ) {
-        texData.clear();
-        texData.resize(dataSize);
-        glActiveTexture(GL_TEXTURE1);
-        glGetTexImage(GL_TEXTURE_3D, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, &texData[0]);
-    }
+
     i = 0;
     switch (scanMode) {
         case BACK_FACES_X: case FRONT_AND_BACK_FACES_X:
@@ -174,112 +300,69 @@ void CompressedHermiteScanner::end() {
             break;
         default:
             break;
-    }
+    } */
 
-    glEnable(GL_DEPTH_TEST);
 }
 
-CompressedHermiteScanner::~CompressedHermiteScanner() {
-    glDeleteTextures(textures.size(), &textures[0]);
-    textures.clear();
+void CompressedHermiteScanner::configureProgram(Direction dir) {
+    uint index = dir;
+    glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
 }
 
-CompressedHermiteSampler::CompressedHermiteSampler(CompressedHermiteData *data) : HermiteDataSampler(data->res), data(data) {
+
+CompressedSignSampler::CompressedSignSampler(CompressedEdgeData *data) : SignSampler(data->res), edgeData(data), data(new CompressedSignData(res)) {
     floodFill();
+    edgeData = nullptr;
 }
 
-bool CompressedHermiteData::unpack(uint data, float& d) {
-    if (data == 0)
-        return false;
-    d = (float)(((data >> 24) & 255)-1)/254.0; // distance from grid point 0..1
-    return true;
-}
-
-bool CompressedHermiteData::unpack(uint data, float& d, Vector3f& n) {
-    if (data == 0)
-        return false;
-    n[2] = (data & 255)*2/255.0 - 1;
-    n[1] = ((data >> 8) & 255)*2/255.0 - 1;
-    n[0] = ((data >> 16) & 255)*2/255.0 - 1;
-    d = (float)(((data >> 24) & 255)-1)/254.0; // distance from grid point 0..1
-    return true;
-}
-
-inline void CompressedHermiteSampler::stepForward(uint orientation, const Index& edge, const Index& to, queue<Index> &indices) {
-    if (sign(to) && data->frontface_cut(orientation, edge) == 0) {
-        setSign(to, false);
+void CompressedSignSampler::step(uint orientation, const Index& edge, const Index& to, queue<Index> &indices) {
+    if (data->sign(to) && !edgeData->cut(orientation, edge)) {
+        data->setOutside(to);
         indices.push(to);
     }
 }
 
-inline void CompressedHermiteSampler::stepBackward(uint orientation, const Index& edge, const Index& to, queue<Index> &indices) {
-    if (sign(to) && data->backface_cut(orientation, edge) == 0) {
-        setSign(to, false);
-        indices.push(to);
-    }
-}
-
-void CompressedHermiteSampler::floodFill() {
+void CompressedSignSampler::floodFill() {
     queue<Index> indices;
     Index start(0,0,0);
     indices.push(start);
-    setSign(start, false);
+    data->setInside(start);
     Index edge(0,0,0);
     while (!indices.empty()) {
         Index& from = indices.front();
-        stepForward(0, from, from.shiftX(1), indices);
-        stepForward(1, from, from.shiftY(1), indices);
-        stepForward(2, from, from.shiftZ(1), indices);
+        step(0, from, from.shiftX(1), indices);
+        step(1, from, from.shiftY(1), indices);
+        step(2, from, from.shiftZ(1), indices);
 
         edge = from.shiftX(-1);
-        stepBackward(0, edge, edge, indices);
+        step(0, edge, edge, indices);
         edge = from.shiftY(-1);
-        stepBackward(1, edge, edge, indices);
+        step(1, edge, edge, indices);
         edge = from.shiftZ(-1);
-        stepBackward(2, edge, edge, indices);
+        step(2, edge, edge, indices);
         indices.pop();
     }
 }
 
-uint CompressedHermiteSampler::compressedEdgeData(uint orientation, const Index& from) const {
-    Index to = from;
-    to[orientation] += 1;
-
-    uint compressedData = 0;
-                                  //    ff
-    if (!sign(from) && sign(to))  // O--|--X
-        compressedData = data->frontface_cut(orientation, from);
-                                       //    bf
-    else if (sign(from) && !sign(to))  // X--|--O
-        compressedData = data->backface_cut(orientation, from);
-
-    return compressedData;
+bool CompressedSignSampler::sign(uint x, uint y, uint z) const {
+    return data->sign(x,y,z);
 }
 
-
 bool CompressedHermiteSampler::frontEdgeInfo(uint orientation, const Index& from, float& d, Vector3f& n) const {
-    uint compressedData = data->frontface_cut(orientation, from);
+    uint compressedData = data->frontface_cut(orientation, from-origin);
     return CompressedHermiteData::unpack(compressedData, d, n);
 }
 
 bool CompressedHermiteSampler::backEdgeInfo(uint orientation, const Index& from, float& d, Vector3f& n) const {
-    uint compressedData = data->backface_cut(orientation, from);
+    uint compressedData = data->backface_cut(orientation, from-origin);
     return CompressedHermiteData::unpack(compressedData, d, n);
 }
 
-bool CompressedHermiteSampler::intersectsEdge(uint orientation, const Index& from, float& d, Vector3f& n) const {
-    return CompressedHermiteData::unpack(compressedEdgeData(orientation, from), d, n);
-}
-
-bool CompressedHermiteSampler::intersectsEdge(uint orientation, const Index &from, float& d) const {
-    return CompressedHermiteData::unpack(compressedEdgeData(orientation, from), d);
-}
-
 bool CompressedHermiteSampler::hasFrontCut(uint orientation, const Index &from) const {
-    return data->frontface_cut(orientation, from) > 0;
+    return data->frontface_cut(orientation, from-origin) > 0;
 }
 
 bool CompressedHermiteSampler::hasBackCut(uint orientation, const Index &from) const {
-    return data->backface_cut(orientation, from) > 0;
+    return data->backface_cut(orientation, from-origin) > 0;
 }
 

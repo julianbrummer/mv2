@@ -184,6 +184,23 @@ void LoadVdaFile(vector<Matrix4f>& trafo, const char* filename, float scale, qre
     std::cout << "Loaded " << filename << " with " << trafo.size() << " transformations" << std::endl;
 }
 
+void writeToOffFile(aligned_vector3f& positions, vector<uint>& indices, const char *filename) {
+    std::ofstream offFile(filename);
+
+    offFile << "OFF" << std::endl;
+    offFile << positions.size() << " " << indices.size()/3 << " " << positions.size()+indices.size()/3-2 << std::endl;
+
+    for(uint i=0; i < positions.size(); i++) {
+        const Vector3f& v = positions[i];
+        offFile << v.x() << " " << v.y() << " " << v.z() << std::endl;
+    }
+
+    for(uint i=0; i < indices.size()/3; i++)
+        offFile << 3 << " " << indices[3*i+0] << " " << indices[3*i+1] << " " << indices[3*i+2] << std::endl;
+
+    offFile.close();
+}
+
 #endif
 
 

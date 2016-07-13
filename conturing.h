@@ -5,6 +5,7 @@
 #include <Eigen/Core>
 #include <array>
 #include <memory>
+#include <iostream>
 #include "def.h"
 
 using namespace std;
@@ -20,6 +21,7 @@ struct Index {
     Index(uint xyz) : x(xyz), y(xyz), z(xyz) {}
     Index() : Index(0) {}
     Index operator +(const Index& index) const;
+    Index operator -(const Index& index) const;
     Index operator /(uint d) const;
     friend Index operator *(const Index& index, uint s);
     friend Index operator *(uint s, const Index& index);
@@ -70,8 +72,10 @@ const uint edge_orientation[12] = {
 };
 
 // power_of_2
-const uint pow2Table[12] = {
-    1,2,4,8,16,32,64,128,256,512,1024,2048
+const uint pow2Table[32] = {1,2,4,8,16,32,64,128,
+                            256,512,1024,2048,4096,8192,16384,32768,
+                            65536,131072,262144,524288,1048576,2097152,4194304,8388608,
+                            16777216,33554432,67108864,134217728,268435456,536870912,1073741824,2147483648
 };
 
 // cell size per level
@@ -138,62 +142,44 @@ uint8_t i_log2(unsigned int n);
 double cellSize(uint level);
 uint pow2(uint e);
 
-class OctreeNode {
-public:
-    uint8_t level;
-    uint8_t signConfig;
 
-    OctreeNode(uint8_t level) : level(level), signConfig(0) {}
-    bool sign(uint i) const;
-    bool signChange(uint e) const;
-    bool frontface(uint e) const;
-    bool backface(uint e) const;
-    bool homogeneousSigns() const;
-    bool in() const;
-    bool out() const;
-};
-
-class Sampler {
+class GridSampler {
 public:
-    static const uint MIN_RESOULTION;
     uint res;
     uint8_t leaf_level;
     uint size; // res+1
 
-    Sampler(uint res);
-    bool sign(uint x, uint y, uint z) const;
-    bool sign(const Index& index) const;
-    void applySigns(OctreeNode& node,  const Index& node_origin) const;
+    GridSampler(uint res);
     uint nodeSize(uint level) const;
+};
+
+class SignSampler : public GridSampler {
+public:
+    SignSampler(uint res) : GridSampler(res) {}
+
+    virtual bool sign(uint x, uint y, uint z) const = 0;
+    bool sign(const Index& index) const;
+    uint8_t signConfig(const Index& node_origin) const;
 
     void inside(float voxelGridRadius, aligned_vector3f &positions);
     void outside(float voxelGridRadius, aligned_vector3f &positions);
-
-protected:
-
-
-    vector<vector<vector<bool>>> signs;
-
-    void setSign(const Index& index, bool b);
 };
 
-class HermiteDataSampler : public Sampler {
+class HermiteDataSampler : public GridSampler  {
+
 public:
-    HermiteDataSampler(uint res) : Sampler(res) {}
+    HermiteDataSampler(uint res) : GridSampler(res) {}
 
     virtual bool frontEdgeInfo(uint orientation, const Index& from, float& d, Vector3f& n) const = 0;
     virtual bool backEdgeInfo(uint orientation, const Index& from, float& d, Vector3f& n) const = 0;
-    virtual bool intersectsEdge(uint orientation, const Index& from, float& d) const = 0;
-    virtual bool intersectsEdge(uint orientation, const Index& from, float& d, Vector3f& n) const = 0;
     virtual bool hasFrontCut(uint orientation, const Index &from) const = 0;
     virtual bool hasBackCut(uint orientation, const Index &from) const = 0;
 
-    bool isComplex(uint orientation, const Index &from) const;
-    bool hasComplexEdge(const Index &cellOrigin) const;
     bool hasCut(const Index &cellOrigin) const;
     bool hasCut(uint orientation, const Index &from) const;
-    int edgeConfig(const Index &cell_index) const;
     void edgeIntersections(float voxelGridRadius, aligned_vector3f &positions, aligned_vector3f &colors);
+
+    virtual ~HermiteDataSampler() = default;
 };
 
 

@@ -4,7 +4,9 @@
         <file>shaders/fshader.glsl</file>
         <file>shaders/vpoints.glsl</file>
         <file>shaders/fpoints.glsl</file>
-        <file>shaders/scan_fragShader.glsl</file>
-        <file>shaders/scan_vertShader.glsl</file>
+        <file>shaders/vEdgeScan.glsl</file>
+        <file>shaders/vHermiteScan.glsl</file>
+        <file>shaders/fEdgeScan.glsl</file>
+        <file>shaders/fHermiteScan.glsl</file>
     </qresource>
 </RCC>

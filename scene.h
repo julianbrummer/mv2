@@ -92,14 +92,14 @@ public:
 
     Trafo() : scale(1.0) {}
 
-    uint size() {
+    uint size() const {
         return M.size();
     }
-    bool empty() {
+    bool empty() const {
         return M.empty();
     }
 
-    Matrix4f& operator [](uint i) {
+    const Matrix4f& operator [](uint i) const {
         return M[i];
     }
 };

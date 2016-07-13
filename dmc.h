@@ -1,7 +1,7 @@
 #ifndef DMC_H
 #define DMC_H
 
-#include "conturing.h"
+#include "scan.h"
 
 const int cornerTable[4096][16] =
 {
@@ -4415,7 +4415,15 @@ const uint face_edge_mask[3][4][4][2] {
     {{{0,7},{0,4},{1,0},{1,3}}, {{0,6},{0,5},{1,1},{1,2}}, {{1,0},{0,4},{0,5},{1,1}}, {{1,3},{0,7},{0,6},{1,2}}}  // (xy plane)
 };
 
-// child cells containing the same edge of a divided edge
+// child cells containing the same edge of a tiled face
+// [orientation][plane -/+][edge][child_cells]
+const uint boundary_face_edge_mask[3][2][4][2] {
+    {{{0,4},{3,7},{3,0},{7,4}}, {{5,1},{6,2},{1,2},{5,6}}}, // (yz plane)
+    {{{0,4},{1,5},{1,0},{5,4}}, {{3,7},{2,6},{2,3},{6,7}}}, // (xz plane)
+    {{{0,3},{1,2},{0,1},{3,2}}, {{7,4},{6,5},{4,5},{7,6}}}  // (xy plane)
+};
+
+// adjacent child cells containing the same edge of a divided edge
 //[orientation][edge(fst,snd)][adjacent_child_cells(l_up, l_down, r_down, r_up)]
 const uint edge_edge_mask[3][2][4] {
     {{4,7,3,0},{5,6,2,1}}, // x oriented edges
@@ -4423,7 +4431,95 @@ const uint edge_edge_mask[3][2][4] {
     {{0,3,2,1},{4,7,6,5}}  // z oriented edges
 };
 
+// child cells containing the same edge of a divided boundary edge
+//[face orientation][plane -/+][edge orientation][edge(fst,snd)][child_cells(order: l_up, l_down, r_down, r_up)]
+const uint boundary_edge_edge_mask[3][2][3][2][2] {
+    // yz plane
+    {
+     { // - plane
+      {{-1,-1}, {-1,-1}}, // x oriented edges
+      {{4,0}, {7,3}},     // y oriented edges
+      {{0,3}, {4,7}}      // z oriented edges
+     },
+     { // + plane
+      {{-1,-1}, {-1,-1}}, // x oriented edges
+      {{1,5}, {2,6}},     // y oriented edges
+      {{2,1}, {6,5}}      // z oriented edges
+     }
+    },
+    // xz plane
+    {
+     { // - plane
+      {{4,0}, {5,1}},     // x oriented edges
+      {{-1,-1}, {-1,-1}}, // y oriented edges
+      {{0,1}, {4,5}}      // z oriented edges
+     },
+     { // + plane
+      {{7,3}, {6,2}},     // x oriented edges
+      {{-1,-1}, {-1,-1}}, // y oriented edges
+      {{3,2}, {7,6}}      // z oriented edges
+     }
+    },
+    // xy plane
+    {
+     { // - plane
+      {{3,0}, {2,1}},     // x oriented edges
+      {{1,0}, {2,3}},     // y oriented edges
+      {{-1,-1}, {-1,-1}}  // z oriented edges
+     },
+     { // + plane
+      {{4,7}, {5,6}},     // x oriented edges
+      {{5,4}, {6,7}},     // y oriented edges
+      {{-1,-1}, {-1,-1}}  // z oriented edges
+     }
+    }
+};
+
 // edge indices defining the same edge defined by 4 cells
+// [face orientation][plane -/+][edge orientation][cell] -> edge index
+const uint edge_of_two_cells[3][2][3][2] {
+    // yz plane
+    {
+     { // - plane
+      {-1,-1}, // x oriented edges
+      {11,8},  // y oriented edges
+      {3,7}    // z oriented edges
+     },
+     { // + plane
+      {-1,-1}, // x oriented edges
+      {9,10},  // y oriented edges
+      {5,1}    // z oriented edges
+     }
+    },
+    // xz plane
+    {
+     { // - plane
+      {2,0},   // x oriented edges
+      {-1,-1}, // y oriented edges
+      {3,1}    // z oriented edges
+     },
+     { // + plane
+      {6,4}, // x oriented edges
+      {-1,-1}, // y oriented edges
+      {7,5}  // z oriented edges
+     }
+    },
+    // xy plane
+    {
+     { // - plane
+      {4,0}, // x oriented edges
+      {9,8}, // y oriented edges
+      {-1,-1}  // z oriented edges
+     },
+     { // + plane
+      {2,6},     // x oriented edges
+      {10,11},     // y oriented edges
+      {-1,-1}  // z oriented edges
+     }
+    }
+};
+
+// edge indices defining the same boundary edge defined by 2 cells
 // [orientation][cell] -> edge index
 const uint edge_of_four_cells[3][4] {
     {2,6,4,0}, // x oriented edges
@@ -4472,41 +4568,36 @@ public:
     SolutionSpace solve(const Vector3f &m, float truncation, Vector3d& c);
     SolutionSpace solve(float truncation, Vector3d &c);
     double evaluate(const Vector3f& v) const;
-
 };
 
 class VertexNode {
 public:
     weak_ptr<VertexNode> parent;
     Vector3f v;
-    QEF qef;
+    unique_ptr<QEF> qef;
     int surfaceIndex;
     int vertexIndex;
     float error;
     bool collapsable;
-    VertexNode() : surfaceIndex(-1), vertexIndex(-1), error(0.0), collapsable(false) {v.setZero(3);}
+    VertexNode() : qef(new QEF()), surfaceIndex(-1), vertexIndex(-1), error(0.0), collapsable(false) {v.setZero(3);}
     void computeError();
 };
 
 bool compareSurfaceIndex(shared_ptr<VertexNode> v1, shared_ptr<VertexNode> v2);
 
-enum FaceType {
-    FRONT_FACE,
-    BACK_FACE
-};
-
-class DMCOctreeCell : public OctreeNode {
+class DMCOctreeCell {
 public:
+    uint8_t level;
     // stray vertices contained in this cell but not connected by edges through inner cell faces
     // those vertices are clustered in an ancestor cell
     vector<shared_ptr<VertexNode>> strayVertices;
     // the (clustered) vertices in this cell
     vector<shared_ptr<VertexNode>> vertices;
-    DMCOctreeCell(uint8_t level) : OctreeNode(level), collapsed(false)  {}
-    virtual VertexNode* vertexAssignedTo(uint edgeIndex, FaceType type) const {return nullptr;}
+    DMCOctreeCell(uint8_t level): level(level), collapsed(false)  {}
+    virtual VertexNode* vertexAssignedTo(uint edgeIndex) const {return nullptr;}
     virtual bool hasChildren() const {return false;}
-    virtual DMCOctreeCell* child(uint i) const {return nullptr;}
-
+    virtual DMCOctreeCell* child(uint i) const {return nullptr;} 
+    virtual bool sign(uint i) const {return false;}
     bool collapsed;
 };
 
@@ -4521,12 +4612,20 @@ public:
     void removeChildren();
 };
 
-class DMCOctreeLeaf : public DMCOctreeCell {
+class DMCOctreeLeaf : public DMCOctreeCell{
 public:
-    array<int8_t, 12> frontEdgeVertices; // vertices associated with the front cut of an edge
-    array<int8_t, 12> backEdgeVertices; // vertices associated with the back cut of an edge
+    uint8_t signConfig;
+
+    array<int8_t, 12> edgeVertices; // vertices associated with the front cut of an edge
     DMCOctreeLeaf(uint8_t level);
-    VertexNode* vertexAssignedTo(uint edgeIndex, FaceType type) const override;
+    VertexNode* vertexAssignedTo(uint edgeIndex) const override;
+    bool sign(uint i) const override;
+    bool signChange(uint e) const;
+    bool frontface(uint e) const;
+    bool backface(uint e) const;
+    bool homogeneousSigns() const;
+    bool in() const;
+    bool out() const;
 };
 
 class DMCOctreeAction {
@@ -4556,25 +4655,18 @@ public:
     void handle(const DMCOctreeCell* node, const Index& index) override;
 };
 
-class DMCCellBuilder : public MeshBuilder {
-    uint res;
-public:
-    DMCCellBuilder(uint res, aligned_vector3f& positions, vector_4_uint& offset)
-        : MeshBuilder(positions, offset), res(res) {}
-    void handle(const DMCOctreeCell* node, const Index& index) override;
+enum FaceType {
+    FRONT_FACE,
+    BACK_FACE
 };
 
-class DMCCollapseUpdater : public DMCOctreeAction {
-    float max_error;
-public:
-    DMCCollapseUpdater(float max_error) : max_error(max_error) {}
-    void handle(const DMCOctreeCell* node, const Index& index) override;
-};
-
-class DualMarchingCubes {
+class DualMarchingCubes : private QOpenGLFunctions_4_3_Core {
 private:
-    shared_ptr<HermiteDataSampler> sampler;
+    const Renderable* scene;
     unique_ptr<DMCOctreeNode> root;
+    QGLShaderProgram programEdgeScan, programHermiteScan;
+    uint res, workRes, leaf_level;
+    float voxelGridRadius, cell_size;
 // init octree
     bool inCell(Vector3d& pos, const Vector3d& cellOrigin, double size, double eps) const;
     void addToQEF(const Index& edge, uint orientation, float d, const Vector3f& n, QEF& qef) const;
@@ -4585,16 +4677,20 @@ private:
     void generateVertex(const Index &cell_index, uint8_t level, QEF& qef, Vector3f& v);
     void createVertexNodesFromNormalGroups(DMCOctreeLeaf &leaf, const Index &leaf_index);
     void createVertexNodesFromEdges(DMCOctreeLeaf &leaf, const Index& leaf_index);
-    void createVertexNodesFromSigns(DMCOctreeLeaf &leaf, const Index& leaf_index);
-    void createVertexNodes(DMCOctreeLeaf &leaf, const Index& leaf_index);
-    bool createOctreeNodes(DMCOctreeNode& parent, unsigned int parent_size, const Index &parent_index);
+
 // init vertexTree
     void assignSurface(const vector<shared_ptr<VertexNode>> &vertices, int from, int to) const;
-    void clusterEdge(array<DMCOctreeCell* , 4> nodes, uint orientation, FaceType type,
+    void clusterIndices(array<DMCOctreeCell* , 4> nodes, uint orientation,
+                     uint& maxSurfaceIndex, const vector<shared_ptr<VertexNode>>& vertices);
+    void clusterBoundaryIndices(array<DMCOctreeCell* , 2> nodes, uint orientation, uint face_orientation, uint plane,
                      uint& maxSurfaceIndex, const vector<shared_ptr<VertexNode>>& vertices);
     void clusterEdge(array<DMCOctreeCell*, 4> nodes, uint orientation,
                      uint& maxSurfaceIndex, const vector<shared_ptr<VertexNode> > &vertices);
+    void clusterBoundaryEdge(array<DMCOctreeCell*, 2> nodes, uint orientation, uint face_orientation, uint plane,
+                     uint& maxSurfaceIndex, const vector<shared_ptr<VertexNode> > &vertices);
     void clusterFace(array<DMCOctreeCell*, 2> nodes, uint orientation,
+                     uint& maxSurfaceIndex, const vector<shared_ptr<VertexNode> > &vertices);
+    void clusterBoundaryFace(DMCOctreeCell* node, uint orientation, uint plane,
                      uint& maxSurfaceIndex, const vector<shared_ptr<VertexNode> > &vertices);
     void clusterCell(const Index &cell_index, DMCOctreeCell* node);
 
@@ -4618,16 +4714,25 @@ private:
     void dfs(DMCOctreeAction& action, bool processEmptyNodes) const;
     void initVector(vector_4_uint& v) const;
 
+    void createVertexNodes(DMCOctreeLeaf *leaf, const Index& leaf_index);
+    bool createOctreeNodes(DMCOctreeNode* parent, uint parent_size, const Index &parent_index);
+
+    bool initShaderProgram(const char *vname, const char *fname, QGLShaderProgram& program);
+    void projectionX(const Index& node_index, QMatrix4x4& projection);
+    void projectionY(const Index& node_index, QMatrix4x4& projection);
+    void projectionZ(const Index& node_index, QMatrix4x4& projection);
+    void conturing(uint currentRes, DMCOctreeNode* node, const Index& node_index);
 public:
+    unique_ptr<SignSampler> signSampler;
+    unique_ptr<HermiteDataSampler> sampler;
     float truncation;
-    DualMarchingCubes(HermiteDataSampler* sampler) : sampler(sampler), truncation(0.1f) {}
-    void createOctree();
-    void createVertexTree();
+    DualMarchingCubes() : scene(nullptr), truncation(0.05f), res(0), workRes(0), voxelGridRadius(0.0f) {}
+    bool conturing(const Renderable* scene, float voxelGridRadius, uint resolution, uint workResolution);
+
     void collapse(float max_error);
     void createMesh(aligned_vector3f& positions, vector<uint>& indices);
     void vertices(aligned_vector3f& positions, aligned_vector3f &colors,
                   vector_4_uint& offset, vector_4_uint &count) const;
-    void cells(aligned_vector3f &positions, vector_4_uint& offset) const;
 };
 
 #endif // DMC_H

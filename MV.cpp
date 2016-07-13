@@ -34,8 +34,9 @@ CGMainWindow::CGMainWindow (QWidget* parent)
 
     // Create a menu
     QMenu *file = new QMenu("&File",this);
-    file->addAction ("Load model", this, SLOT(loadModel()), Qt::CTRL+Qt::Key_L);
-    //file->addAction ("Load track", this, SLOT(loadTrack()), Qt::CTRL+Qt::Key_T);
+    file->addAction ("Load model", ogl, SLOT(loadModel()), Qt::CTRL+Qt::Key_L);
+    //file->addAction ("Load track", ogl, SLOT(loadTrack()), Qt::CTRL+Qt::Key_T);
+    file->addAction ("Save model", ogl, SLOT(storeModel()), Qt::CTRL+Qt::Key_S);
     file->addAction ("DMC", ogl, SLOT(dmc()), Qt::CTRL+Qt::Key_D);
     file->addAction ("Quit", qApp, SLOT(quit()), Qt::CTRL+Qt::Key_Q);
 
@@ -47,6 +48,7 @@ CGMainWindow::CGMainWindow (QWidget* parent)
     view->addAction ("Inner Grid", ogl, SLOT(toggleViewInGridPoints()), Qt::Key_I)->setCheckable(true);
     view->addAction ("Vertices", ogl, SLOT(toggleViewDMCVertices()), Qt::Key_V)->setCheckable(true);
     view->addAction ("DMC Mesh", ogl, SLOT(toggleViewDMCModel()), Qt::Key_D)->setCheckable(true);
+    view->addAction ("Wireframe", ogl, SLOT(toggleWireframe()), Qt::Key_W)->setCheckable(true);
     view->addAction ("Cells", ogl, SLOT(toggleViewCells()), Qt::Key_C)->setCheckable(true);
     view->addAction ("Higher Level", ogl, SLOT(decreaseSelectedLevel()), Qt::Key_Plus);
     view->addAction ("Lower Level", ogl, SLOT(increaseSelectedLevel()), Qt::Key_Minus);
@@ -68,7 +70,7 @@ CGMainWindow::CGMainWindow (QWidget* parent)
     threshold_slider->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
     simplify_button->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
 
-    connect(threshold_slider,SIGNAL(valueChanged(int)),this,SLOT(sliderValueChanged(int)));
+    connect(threshold_slider,SIGNAL(valueChanged(int)),ogl,SLOT(sliderValueChanged(int)));
     connect(simplify_button,SIGNAL(clicked(bool)),ogl,SLOT(updateDMCMesh()));
 
     // Put the widgets inside the frame
@@ -278,25 +280,16 @@ void writeToStlFile(const std::vector<Vertex>& T, const char *filename) {
 
     outstream.close();
 }
-
-void writeToOffFile(std::vector<QVector3D>& vertex, std::vector<int>& face,const char *filename) {
-    std::ofstream offFile(filename);
-
-    offFile << "OFF" << std::endl;
-    offFile << vertex.size() << " " << face.size()/3 << " " << vertex.size()+face.size()/3-2 << std::endl;
-
-    for(size_t i=0;i<vertex.size();i++) {
-        const QVector3D& a = vertex[i];
-        offFile << a.x() << " " << a.y() << " " << a.z() << std::endl;
-    }
-
-    for(size_t i=0;i<face.size()/3;i++)
-        offFile << 3 << " " << face[3*i+0] << " " << face[3*i+1] << " " << face[3*i+2] << std::endl;
-
-    offFile.close();
-}
 */
-void CGMainWindow::loadTrack() {
+
+void ConturingWidget::storeModel() {
+    if (dmcModel) {
+        writeToOffFile(positions, indices, "D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/out/motor.off");
+        main->statusBar()->showMessage ("Saving model done.",3000);
+    }
+}
+
+void ConturingWidget::loadTrack() {
 // QString filename = QFileDialog::getOpenFileName(this, "Load track ...", QString(), "(*.vda)" );
 
 // if (filename.isEmpty()) return;
@@ -306,11 +299,11 @@ void CGMainWindow::loadTrack() {
 //     std::ifstream trackfile(filename.toLatin1());
 // }
 
-    LoadVdaFile(ogl->trafo.M,"D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/tracks/track.vda",ogl->trafo.scale, ogl->timestep);
-    ogl->updateTrafoModel();
+    LoadVdaFile(trafo.M,"D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/tracks/track.vda",trafo.scale, timestep);
+    updateTrafoModel();
 }
 
-void CGMainWindow::loadModel() {
+void ConturingWidget::loadModel() {
 /*
     QString filename = QFileDialog::getOpenFileName(this, "Load model ...", QString(), "(*.stl *.off)" );
 
@@ -325,24 +318,24 @@ void CGMainWindow::loadModel() {
         LoadOffFile(filename.toLatin1(), positions, normals);
 */
     aligned_vector3f positions, normals;
-    LoadOffFile("D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/models/motor.off", positions, normals);
-    ogl->model = unique_ptr<Model>(new Model(positions, normals, GL_TRIANGLES, true, 1.8));
-    ogl->updateTrafoModel();
-    ogl->camera.position = ogl->camera.rotation._transformVector(Z_AXIS) + ogl->camera.center;
-    statusBar()->showMessage ("Loading model done.",3000);
-    ogl->showModel = true;
-    ogl->updateGL();
+    LoadOffFile("D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/models/fandisk.off", positions, normals);
+    model = unique_ptr<Model>(new Model(positions, normals, GL_TRIANGLES, true, 1.8));
+    updateTrafoModel();
+    camera.position = camera.rotation._transformVector(Z_AXIS) + camera.center;
+    main->statusBar()->showMessage ("Loading model done.",3000);
+    showModel = true;
+    updateGL();
 }
 
-void CGMainWindow::sliderValueChanged(int value) {
-    ogl->updateThreshold((float)value/SLIDER_GRANULARITY);
-    t_error_label->setText(to_string(ogl->errorThreshold).c_str());
+void ConturingWidget::sliderValueChanged(int value) {
+    updateThreshold((float)value/CGMainWindow::SLIDER_GRANULARITY);
+    main->t_error_label->setText(to_string(errorThreshold).c_str());
 }
 
 const float ConturingWidget::CAMERA_MOVEMENT_SPEED = 0.0025;
 const float ConturingWidget::CAMERA_SCROLL_FACTOR = 1.2;
 const float ConturingWidget::MIN_ERROR_THRESHOLD = 0;
-const float ConturingWidget::MAX_ERROR_THRESHOLD = 0.001;
+const float ConturingWidget::MAX_ERROR_THRESHOLD = 0.0001;
 
 ConturingWidget::ConturingWidget (CGMainWindow *mainwindow,QWidget* parent ) : QGLWidget (parent) {
     main = mainwindow;
@@ -372,7 +365,7 @@ void ConturingWidget::initializeGL() {
     initializeOpenGLFunctions();
     initShaderProgram(":/shaders/vshader.glsl", ":/shaders/fshader.glsl", program);
     initShaderProgram(":/shaders/vpoints.glsl", ":/shaders/fpoints.glsl", programColor);
-    initShaderProgram(":/shaders/scan_vertShader.glsl", ":/shaders/scan_fragShader.glsl", programScan);
+    //initShaderProgram(":/shaders/scan_vertShader.glsl", ":/shaders/scan_fragShader.glsl", programScan);
 
     qglClearColor(Qt::black);
     glPointSize(4.0);
@@ -391,8 +384,8 @@ void ConturingWidget::initializeGL() {
 
     trafo_now = 0;
     trafo.scale = 1000.0;
-    //main->loadTrack();
-    main->loadModel();
+    //loadTrack();
+    loadModel();
     showModel = false;
     showDMCModel = false;
     showEdgeIntesections = false;
@@ -400,6 +393,7 @@ void ConturingWidget::initializeGL() {
     showOutGridPoints = false;
     showDMCVertices = false;
     showCells = false;
+    wireframe = false;
     selectedLevel = 0;
 }
 
@@ -439,6 +433,7 @@ void ConturingWidget::renderDebugMesh(Model* model, const Matrix4f &V, bool useV
 
 void ConturingWidget::paintGL() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
     Matrix4f V = camera.getViewMatrix();
     if (model && showModel) {
@@ -448,6 +443,8 @@ void ConturingWidget::paintGL() {
         renderModel(model.get(), VM, QVector4D(0.75,0.75,0.75,1.0));
     }
     if (dmcModel && showDMCModel) {
+        if (wireframe)
+            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         Matrix4f VM = V * dmcModel->getModelMatrix();
         renderModel(dmcModel.get(), VM, QVector4D(1,0.75,0.0,1.0));
     }
@@ -616,7 +613,7 @@ void ConturingWidget::updateDMCMesh() {
     if (DMC) {
         main->statusBar()->showMessage(("simplify (t = " + to_string(errorThreshold) + ")...").c_str());
         DMC->collapse(errorThreshold);
-/*
+
         main->statusBar()->showMessage("generate vertex model...");
         aligned_vector3f positions, colors;
         v_offset.clear();
@@ -625,17 +622,17 @@ void ConturingWidget::updateDMCMesh() {
         dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
         dmcVertices->setPosition(origin);
         dmcVertices->scale = 2*cellGridRadius;
-*/
+
         createDMCMesh();
         updateGL();
     }
 }
 
 void ConturingWidget::createDMCMesh() {
+    positions.clear();
+    indices.clear();
     main->statusBar()->showMessage("create DMC Mesh...");
     std::cout << "create DMC Mesh..." << std::endl;
-    aligned_vector3f positions;
-    vector<uint> indices;
     DMC->createMesh(positions, indices);
     dmcModel = unique_ptr<Model>(new Model(positions, indices, false));
     dmcModel->setPosition(origin);
@@ -648,25 +645,65 @@ void ConturingWidget::createDMCMesh() {
                   + to_string(indices.size()/3) + " Triangles").c_str() << std::endl;
 }
 
-void ConturingWidget::scanModel(const QMatrix4x4& P, const QMatrix4x4& V, const Matrix4f& M) {
-    QMatrix4x4 PV = P * V;
+void ConturingWidget::render(QGLShaderProgram& program, const QMatrix4x4 &projection, const QMatrix4x4 &view) const {
+    QMatrix4x4 PV = projection * view;
+    Matrix4f M = model->getModelMatrix();
     if (trafo.empty()) {
         QMatrix4x4 qM = qMat(M);
-        programScan.setUniformValue("uMVPMat", PV * qM);
-        programScan.setUniformValue("uNMat", qM.normalMatrix());
-        model->render(programScan);
+        program.setUniformValue("uMVPMat", PV*qM);
+        program.setUniformValue("uNMat", qM.normalMatrix());
+        model->render(program);
     } else {
         for (uint i = 0; i < trafo.size(); ++i) {
             Matrix4f M_trafo = M * trafo[i];
             QMatrix4x4 qM_trafo = qMat(M_trafo);
-            programScan.setUniformValue("uMVPMat", PV * qM_trafo);
-            programScan.setUniformValue("uNMat", qM_trafo.normalMatrix());
-            model->render(programScan);
+            program.setUniformValue("uMVPMat", PV * qM_trafo);
+            program.setUniformValue("uNMat", qM_trafo.normalMatrix());
+            model->render(program);
         }
     }
 }
 
 void ConturingWidget::dmc() {
+    aligned_vector3f positions, colors;
+    DMC = unique_ptr<DualMarchingCubes>(new DualMarchingCubes());
+    DMC->conturing(this, voxelGridRadius, DEFAULT_RESOLUTION, DEFAULT_WORK_RESOLUTION);
+    //DMC->collapse(0.0f);
+    //DMC->signSampler->inside(voxelGridRadius, positions);
+    //inGridPoints = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
+    positions.clear();
+    colors.clear();
+    std::cout << " get vertices " << std::endl;
+    DMC->vertices(positions, colors, v_offset, v_count);
+    dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
+    dmcVertices->setPosition(origin);
+    dmcVertices->scale = 2*cellGridRadius;
+    for (int i = 0; i < levels; ++i) {
+        uint levelSize = pow2(i);
+        for (uint x = 0; x < levelSize; ++x)
+            for (uint y = 0; y < levelSize; ++y)
+                for (uint z = 0; z < levelSize; ++z)
+                    v_level_count[i] += v_count[i][x][y][z];
+    }
+    createDMCMesh();
+    positions.clear();
+    colors.clear();
+    DMC->sampler->edgeIntersections(voxelGridRadius, positions, colors);
+    edgeIntersections = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
+/*
+    main->statusBar()->showMessage("generate vertex model...");
+    std::cout << "generate vertex model..." << std::endl;
+    positions.clear();
+    colors.clear();
+    DMC->vertices(positions, colors, v_offset, v_count);
+    dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
+    dmcVertices->setPosition(origin);
+    dmcVertices->scale = 2*cellGridRadius;
+*/
+    //inGridPoints = unique_ptr<Model>(new Model(positions, colors, false, GL_LINES));
+
+
+    /*
 
     CompressedHermiteScanner* scan = new CompressedHermiteScanner(FRONT_AND_BACK_XYZ, res, voxelGridRadius, programScan);
     QMatrix4x4 V;
@@ -713,12 +750,12 @@ void ConturingWidget::dmc() {
     positions.clear();
     sampler->inside(voxelGridRadius, positions);
     inGridPoints = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
-/*
+
     std::cout << "generate out grid model" << std::endl;
     positions.clear();
     sampler.outside(voxelGridRadius, positions);
     outGridPoints = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
-*/
+
 
     DMC = unique_ptr<DualMarchingCubes>(new DualMarchingCubes(sampler));
     main->statusBar()->showMessage("create octree...");
@@ -741,14 +778,13 @@ void ConturingWidget::dmc() {
     dmcVertices->setPosition(origin);
     dmcVertices->scale = 2*cellGridRadius;
 
-/*
     main->statusBar()->showMessage("generate cell model...");
     positions.clear();
     DMC->cells(positions, cell_offset);
     cells = unique_ptr<Model>(new Model(positions, GL_LINES, false));
     cells->setPosition(origin);
     cells->scale = 2*cellGridRadius;
-*/
+
     for (int i = 0; i < levels; ++i) {
         uint levelSize = pow2(i);
         for (uint x = 0; x < levelSize; ++x)
@@ -765,7 +801,7 @@ void ConturingWidget::dmc() {
     createDMCMesh();
 
 
-
+*/
     resizeGL(w,h);
 }
 
