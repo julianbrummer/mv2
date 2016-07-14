@@ -100,8 +100,8 @@ public:
     static const float CAMERA_SCROLL_FACTOR;
     static const float MIN_ERROR_THRESHOLD;
     static const float MAX_ERROR_THRESHOLD;
-    static const int DEFAULT_RESOLUTION = 256;
-    static const int DEFAULT_WORK_RESOLUTION = 256;
+    static const int DEFAULT_RESOLUTION = 1024;
+    static const int DEFAULT_WORK_RESOLUTION = 512;
     static const int MAX_RESOLUTION = 512;
 
     ConturingWidget(CGMainWindow*,QWidget*);

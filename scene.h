@@ -9,6 +9,24 @@
 using namespace Eigen;
 using namespace std;
 
+class Trafo {
+public:
+    vector<Matrix4f> M;
+    float scale;
+
+    Trafo() : scale(1.0) {}
+
+    uint size() const {
+        return M.size();
+    }
+    bool empty() const {
+        return M.empty();
+    }
+
+    const Matrix4f& operator [](uint i) const {
+        return M[i];
+    }
+};
 
 class SceneObject {
 public:
@@ -49,14 +67,20 @@ public:
     Matrix4f getModelMatrix() const;
     Vector3f center;
     float scale;
+
+    void init(float size, const Trafo& T);
 private:
-    void init(const aligned_vector3f &positions, float size);
+    void centerAndScale(float size);
+    void init(float size);
     void aabb(const aligned_vector3f& positions,
+              float& x1, float& y1, float& z1, float& x2, float& y2, float& z2);
+    void aabb(const aligned_vector3f& positions, const Trafo& T,
               float& x1, float& y1, float& z1, float& x2, float& y2, float& z2);
 
 
     int mode;
     Vector3f min, max, ext;
+    aligned_vector3f positions;
 
     shared_ptr<VBO> vbo;
 
@@ -85,23 +109,6 @@ public:
 
 };
 
-class Trafo {
-public:
-    vector<Matrix4f> M;
-    float scale;
 
-    Trafo() : scale(1.0) {}
-
-    uint size() const {
-        return M.size();
-    }
-    bool empty() const {
-        return M.empty();
-    }
-
-    const Matrix4f& operator [](uint i) const {
-        return M[i];
-    }
-};
 
 #endif // MODEL_H

@@ -299,7 +299,7 @@ void ConturingWidget::loadTrack() {
 //     std::ifstream trackfile(filename.toLatin1());
 // }
 
-    LoadVdaFile(trafo.M,"D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/tracks/track.vda",trafo.scale, timestep);
+    LoadVdaFile(trafo.M,"D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/tracks/Einfahrt.vda",trafo.scale, timestep);
     updateTrafoModel();
 }
 
@@ -318,7 +318,7 @@ void ConturingWidget::loadModel() {
         LoadOffFile(filename.toLatin1(), positions, normals);
 */
     aligned_vector3f positions, normals;
-    LoadOffFile("D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/models/fandisk.off", positions, normals);
+    LoadOffFile("D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/models/Greifer.off", positions, normals);
     model = unique_ptr<Model>(new Model(positions, normals, GL_TRIANGLES, true, 1.8));
     updateTrafoModel();
     camera.position = camera.rotation._transformVector(Z_AXIS) + camera.center;
@@ -383,8 +383,8 @@ void ConturingWidget::initializeGL() {
     cell_level_count = vector<uint>(levels, 0);
 
     trafo_now = 0;
-    trafo.scale = 1000.0;
-    //loadTrack();
+    trafo.scale = 1.0;
+    loadTrack();
     loadModel();
     showModel = false;
     showDMCModel = false;
@@ -400,7 +400,7 @@ void ConturingWidget::initializeGL() {
 void ConturingWidget::updateTrafoModel() {
     if (!trafo.empty() && model) {
         model->scale /= trafo.scale;
-        model->center = (trafo[0] * model->center.homogeneous()).block<3,1>(0,0);
+        model->init(2.0f, trafo);
     }
 }
 
@@ -613,7 +613,7 @@ void ConturingWidget::updateDMCMesh() {
     if (DMC) {
         main->statusBar()->showMessage(("simplify (t = " + to_string(errorThreshold) + ")...").c_str());
         DMC->collapse(errorThreshold);
-
+/*
         main->statusBar()->showMessage("generate vertex model...");
         aligned_vector3f positions, colors;
         v_offset.clear();
@@ -622,7 +622,7 @@ void ConturingWidget::updateDMCMesh() {
         dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
         dmcVertices->setPosition(origin);
         dmcVertices->scale = 2*cellGridRadius;
-
+*/
         createDMCMesh();
         updateGL();
     }
@@ -673,6 +673,7 @@ void ConturingWidget::dmc() {
     //inGridPoints = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
     positions.clear();
     colors.clear();
+    /*
     std::cout << " get vertices " << std::endl;
     DMC->vertices(positions, colors, v_offset, v_count);
     dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
@@ -684,12 +685,12 @@ void ConturingWidget::dmc() {
             for (uint y = 0; y < levelSize; ++y)
                 for (uint z = 0; z < levelSize; ++z)
                     v_level_count[i] += v_count[i][x][y][z];
-    }
-    createDMCMesh();
+    }*/
+    createDMCMesh();/*
     positions.clear();
     colors.clear();
     DMC->sampler->edgeIntersections(voxelGridRadius, positions, colors);
-    edgeIntersections = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
+    edgeIntersections = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));*/
 /*
     main->statusBar()->showMessage("generate vertex model...");
     std::cout << "generate vertex model..." << std::endl;

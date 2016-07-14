@@ -1,5 +1,6 @@
 #include "scene.h"
 #include <iostream>
+#include <array>
 
 SceneObject::SceneObject() {
     position.setZero(3);
@@ -71,7 +72,7 @@ SceneObject& SceneObject::setRotation(float angle, const Vector3f& axis) {
 }
 
 Model::Model(const aligned_vector3f &positions, const vector<uint> &triangles, bool centerAndScale, float size)
-        : SceneObject(), mode(GL_TRIANGLES) {
+        : SceneObject(), mode(GL_TRIANGLES), positions(positions) {
     aligned_vectorPosNormal posAndNormals;
     for (uint i = 0; i < triangles.size(); i+=3) {
         const Vector3f& v0 = positions[triangles[i]];
@@ -86,14 +87,15 @@ Model::Model(const aligned_vector3f &positions, const vector<uint> &triangles, b
     VBOInfo posNormal(0,sizeof(Vector3f));
     vbo = shared_ptr<VBO>(new VBO(posAndNormals, posNormal));
     if (centerAndScale)
-        init(positions, size);
+        init(size);
     else {
         center.setZero(3);
         scale = 1.0;
     }
 }
 
-Model::Model(const aligned_vector3f &positions, const aligned_vector3f &normals, int mode, bool centerAndScale, float size) : SceneObject(), mode(mode) {
+Model::Model(const aligned_vector3f &positions, const aligned_vector3f &normals, int mode, bool centerAndScale, float size)
+        : SceneObject(), mode(mode), positions(positions) {
     aligned_vectorPosNormal posAndNormals;
     for (uint i = 0; i < positions.size(); ++i) {
         posAndNormals.push_back(PositionNormal(positions[i], normals[i]));
@@ -101,14 +103,15 @@ Model::Model(const aligned_vector3f &positions, const aligned_vector3f &normals,
     VBOInfo posNormal(0,sizeof(Vector3f));
     vbo = shared_ptr<VBO>(new VBO(posAndNormals, posNormal));
     if (centerAndScale)
-        init(positions, size);
+        init(size);
     else {
         center.setZero(3);
         scale = 1.0;
     }
 }
 
-Model::Model(const aligned_vector3f &positions, const aligned_vector3f &colors, bool centerAndScale, int mode, float size) : SceneObject(), mode(mode) {
+Model::Model(const aligned_vector3f &positions, const aligned_vector3f &colors, bool centerAndScale, int mode, float size)
+        : SceneObject(), mode(mode), positions(positions) {
     aligned_vectorPosColor posAndColors;
     for (uint i = 0; i < positions.size(); ++i) {
         posAndColors.push_back(PositionColor(positions[i], colors[i]));
@@ -116,29 +119,77 @@ Model::Model(const aligned_vector3f &positions, const aligned_vector3f &colors, 
     VBOInfo posColor(0,-1,sizeof(Vector3f));
     vbo = shared_ptr<VBO>(new VBO(posAndColors, posColor));
     if (centerAndScale)
-        init(positions, size);
+        init(size);
     else {
         center.setZero(3);
         scale = 1.0;
     }
 }
 
-Model::Model(const aligned_vector3f &positions, int mode, bool centerAndScale, float size) : SceneObject(), mode(mode) {
+Model::Model(const aligned_vector3f &positions, int mode, bool centerAndScale, float size)
+        : SceneObject(), mode(mode), positions(positions) {
     VBOInfo posOnly(0,-1,-1);
     vbo = shared_ptr<VBO>(new VBO(positions, posOnly));
     if (centerAndScale)
-        init(positions, size);
+        init(size);
     else {
         center.setZero(3);
         scale = 1.0;
     }
 }
 
-void Model::init(const aligned_vector3f &positions, float size) {
-    aabb(positions, min[0], min[1], min[2], max[0], max[1], max[2]);
+void Model::centerAndScale(float size) {
     center = (min+max)*0.5;
     ext = max - min;
     scale = size/std::max(std::max(ext.x(),ext.y()),ext.z());
+}
+
+void Model::init(float size, const Trafo& T) {
+    aligned_vector3f positions;
+    positions.resize(T.size()*8);
+    array<Vector4f, 8> v {
+        Vector4f(min[0], min[1], min[2], 1),
+        Vector4f(min[0], min[1], max[2], 1),
+        Vector4f(min[0], max[1], min[2], 1),
+        Vector4f(min[0], max[1], max[2], 1),
+        Vector4f(max[0], min[1], min[2], 1),
+        Vector4f(max[0], min[1], max[2], 1),
+        Vector4f(max[0], max[1], min[2], 1),
+        Vector4f(max[0], max[1], max[2], 1),
+    };
+
+
+    for (int t = 0; t < T.size(); ++t) {
+        for (int i = 0; i < 8; ++i) {
+            positions[8*t+i] = (T[t] * v[i]).block<3,1>(0,0);
+        }
+    }
+    aabb(positions, min[0], min[1], min[2], max[0], max[1], max[2]);
+    centerAndScale(size);
+}
+
+void Model::init(float size) {
+    aabb(positions, min[0], min[1], min[2], max[0], max[1], max[2]);
+    centerAndScale(size);
+}
+
+void Model::aabb(const aligned_vector3f& positions, const Trafo& T,
+                 float& x1, float& y1, float& z1, float& x2, float& y2, float& z2) {
+    double inf = std::numeric_limits<double>::infinity();
+
+    x1 = y1 = z1 =  inf;
+    x2 = y2 = z2 = -inf;
+    for (int t = 0; t < T.size(); ++t) {
+        for(uint i = 0; i < positions.size(); i++) {
+            Vector3f v = (T[t] * positions[i].homogeneous()).block<3,1>(0,0);
+            if (v.x() < x1) x1 = v.x();
+            if (v.x() > x2) x2 = v.x();
+            if (v.y() < y1) y1 = v.y();
+            if (v.y() > y2) y2 = v.y();
+            if (v.z() < z1) z1 = v.z();
+            if (v.z() > z2) z2 = v.z();
+        }
+    }
 }
 
 void Model::aabb(const aligned_vector3f& positions,
