@@ -4660,9 +4660,10 @@ enum FaceType {
     BACK_FACE
 };
 
+
 class DualMarchingCubes : private QOpenGLFunctions_4_3_Core {
 private:
-    const Renderable* scene;
+    RenderStrategy* scene;
     unique_ptr<DMCOctreeNode> root;
     QGLShaderProgram programEdgeScan, programHermiteScan;
     uint res, workRes, leaf_level;
@@ -4727,7 +4728,7 @@ public:
     unique_ptr<HermiteDataSampler> sampler;
     float truncation;
     DualMarchingCubes() : scene(nullptr), truncation(0.05f), res(0), workRes(0), voxelGridRadius(0.0f) {}
-    bool conturing(const Renderable* scene, float voxelGridRadius, uint resolution, uint workResolution);
+    bool conturing(RenderStrategy* scene, float voxelGridRadius, uint resolution, uint workResolution);
 
     void collapse(float max_error);
     void createMesh(aligned_vector3f& positions, vector<uint>& indices);

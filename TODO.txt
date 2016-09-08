@@ -1,0 +1,6 @@
+- epsilon for face/edge intersections near grid points (depends on resolution?)
+- patches between meshes (with optional geometry shader stage?)
+- offset for meshes/generator
+- GL_ARB_sparse_texture?
+- trade-off triangle-fold-overs vs. clean edges 
+- performance optimizations (calculation threads, one render thread)

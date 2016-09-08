@@ -13,6 +13,8 @@
 #include <QtOpenGL/QGLFunctions>
 #include <QtOpenGL/QGLShaderProgram>
 #include <QOpenGLFunctions_2_0>
+#include <QOpenGLFunctions_4_3_Core>
+#include <QOpenGLBuffer>
 
 #include <vector>
 #include <iostream>
@@ -39,8 +41,50 @@ public:
 
 };
 
+class DefaultRenderStrategy : public RenderStrategy, protected QOpenGLFunctions_4_3_Core {
+protected:
+    virtual void subroutineSelection(GLuint index[2]);
+    virtual void doRender(QGLShaderProgram& program, const QMatrix4x4& projection, const QMatrix4x4& view) = 0;
+public:
+    bool initShaders(QGLShaderProgram &programEdgeScan, QGLShaderProgram &programHermiteScan) const override;
+    void render(QGLShaderProgram& program, const QMatrix4x4& projection, const QMatrix4x4& view) override;
+};
 
-class ConturingWidget : public QGLWidget, public QOpenGLFunctions_2_0, public Renderable {
+class RenderSingleModel : public DefaultRenderStrategy {
+private:
+    const Model* model;
+public:
+    RenderSingleModel(const Model *model);
+protected:
+    void doRender(QGLShaderProgram& program, const QMatrix4x4& projection, const QMatrix4x4& view) override;
+};
+
+class RenderTrafoModel : public DefaultRenderStrategy {
+private:
+    const Model* model;
+    const Trafo* trafo;
+    int progress_update_instances;
+public:
+    RenderTrafoModel(const Model *model, const Trafo *trafo, int progress_update_instances);
+protected:
+    void doRender(QGLShaderProgram& program, const QMatrix4x4& projection, const QMatrix4x4& view) override;
+};
+
+class RenderTrafoModelInstanced : public DefaultRenderStrategy {
+private:
+    const Model* model;
+    const Trafo* trafo;
+    SSBO trafo_buffer, trafo_normal_buffer;
+    int max_instances;
+    void fillBuffer(const QMatrix4x4 &projection, const QMatrix4x4 &view);
+public:
+    RenderTrafoModelInstanced(const Model *model, const Trafo *trafo, int max_instances);
+protected:
+    virtual void subroutineSelection(GLuint index[2]);
+    void doRender(QGLShaderProgram& program, const QMatrix4x4& projection, const QMatrix4x4& view) override;
+};
+
+class ConturingWidget : public QGLWidget, public QOpenGLFunctions_2_0 {
     Q_OBJECT
 
 public slots:
@@ -103,9 +147,10 @@ public:
     static const int DEFAULT_RESOLUTION = 1024;
     static const int DEFAULT_WORK_RESOLUTION = 512;
     static const int MAX_RESOLUTION = 512;
+    static const int MAX_INSTANCES = 1000;
+
 
     ConturingWidget(CGMainWindow*,QWidget*);
-    bool initShaderProgram(const char *vname, const char *fname, QGLShaderProgram& program);
     void initializeGL();
 
     void trackballCoord(int x, int y, Vector3f& v);
@@ -113,9 +158,9 @@ public:
 
     void updateThreshold(float s);
     void updateTrafoModel();
-    void render(QGLShaderProgram& program, const QMatrix4x4& projection, const QMatrix4x4& view) const override;
 
     unique_ptr<Model> model, edgeIntersections, inGridPoints, outGridPoints, dmcVertices, dmcModel, cells;
+    unique_ptr<RenderStrategy> scene;
     Camera camera;
 
     Vector3f origin;
@@ -129,7 +174,7 @@ public:
     int levels;
 
     qreal timestep;
-    Trafo trafo;
+    unique_ptr<Trafo> trafo;
     int trafo_now;
 
 protected:
@@ -154,8 +199,7 @@ private:
     void createDMCMesh();
     void createCellMesh();
 
-    QGLShaderProgram program, programColor;
-    QGLShaderProgram programScan;
+    QGLShaderProgram program, programDebug;
     int w, h;
     float rotX, rotY, zoom;
 

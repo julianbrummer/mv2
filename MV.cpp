@@ -282,6 +282,116 @@ void writeToStlFile(const std::vector<Vertex>& T, const char *filename) {
 }
 */
 
+bool DefaultRenderStrategy::initShaders(QGLShaderProgram &programEdgeScan, QGLShaderProgram &programHermiteScan) const {
+    if (!initShaderProgram(":/shaders/vEdgeScan.glsl", ":/shaders/fEdgeScan.glsl", programEdgeScan))
+        return false;
+    if (!initShaderProgram(":/shaders/vHermiteScan.glsl", ":/shaders/fHermiteScan.glsl", programHermiteScan))
+        return false;
+    return true;
+}
+
+void DefaultRenderStrategy::subroutineSelection(GLuint index[2]) {
+    index[0] = 0;
+    index[1] = 2;
+}
+
+void DefaultRenderStrategy::render(QGLShaderProgram &program, const QMatrix4x4 &projection, const QMatrix4x4 &view) {
+    GLuint index[2];
+    subroutineSelection(index);
+    GLint subroutine_count = 0;
+    glGetProgramStageiv(program.programId(), GL_VERTEX_SHADER, GL_ACTIVE_SUBROUTINE_UNIFORM_LOCATIONS, &subroutine_count);
+    glUniformSubroutinesuiv(GL_VERTEX_SHADER, subroutine_count, &index[0]);
+    doRender(program, projection, view);
+}
+
+RenderSingleModel::RenderSingleModel(const Model *model) : model(model) {
+    initializeOpenGLFunctions();
+}
+
+
+void RenderSingleModel::doRender(QGLShaderProgram &program, const QMatrix4x4 &projection, const QMatrix4x4 &view) {
+    QMatrix4x4 PV = projection * view;
+    Matrix4f M = model->getModelMatrix();
+    QMatrix4x4 qM = qMat(M);
+    program.setUniformValue("uMVPMat", PV*qM);
+    program.setUniformValue("uNMat", qM.normalMatrix());
+    model->render(program);
+}
+
+
+RenderTrafoModel::RenderTrafoModel(const Model* model, const Trafo* trafo, int progress_update_instances)
+        : model(model), trafo(trafo), progress_update_instances(progress_update_instances) {
+    initializeOpenGLFunctions();
+}
+
+void RenderTrafoModel::doRender(QGLShaderProgram &program, const QMatrix4x4 &projection, const QMatrix4x4 &view) {
+    QMatrix4x4 PV = projection * view;
+    for (uint i = 0; i < trafo->size(); ++i) {
+        Matrix4f M_trafo = model->getModelMatrix() * (*trafo)[i];
+        QMatrix4x4 qM = qMat(M_trafo);
+        program.setUniformValue("uMVPMat", PV * qM);
+        program.setUniformValue("uNMat", qM.normalMatrix());
+        model->render(program);
+        glFinish();
+        glFlush();
+        if (i % progress_update_instances == 0)
+            std::cout << "  rendering " << i << "/" << trafo->size() << "\r" << std::flush;
+    }
+    std::cout << "  rendering done." << trafo->size() << "/" << trafo->size() << std::endl;
+}
+
+RenderTrafoModelInstanced::RenderTrafoModelInstanced(const Model* model, const Trafo* trafo, int max_instances)
+        : model(model), trafo(trafo), trafo_buffer(1, trafo->size()*64, GL_DYNAMIC_DRAW),
+          trafo_normal_buffer(2, trafo->size()*48, GL_STATIC_DRAW), max_instances(max_instances) {
+    initializeOpenGLFunctions();
+    std::cout << "fill SSBO with normal matrices" << std::endl;
+    trafo_normal_buffer.bind();
+    for (uint i = 0; i < trafo->size(); ++i) {
+        Matrix4f M_trafo = model->getModelMatrix() * (*trafo)[i];
+        QMatrix3x3 nMat = qMat(M_trafo).normalMatrix();
+        QMatrix4x4 padded_nMat = QMatrix4x4(nMat);
+        trafo_normal_buffer.bufferSubData(i*48, 48, padded_nMat.data());
+    }
+    trafo_normal_buffer.unBind();
+}
+
+void RenderTrafoModelInstanced::fillBuffer(const QMatrix4x4 &projection, const QMatrix4x4 &view) {
+    std::cout << "  fill SSBO with transformation matrices" << std::endl;
+    QMatrix4x4 PV = projection * view;
+    trafo_buffer.bind();
+    for (uint i = 0; i < trafo->size(); ++i) {
+        Matrix4f M_trafo = model->getModelMatrix() * (*trafo)[i];
+        QMatrix4x4 mvpMat = PV * qMat(M_trafo);
+        trafo_buffer.bufferSubData(i*64, 64, mvpMat.data());
+    }
+    trafo_buffer.unBind();
+}
+
+void RenderTrafoModelInstanced::subroutineSelection(GLuint index[2]) {
+    index[0] = 1;
+    index[1] = 3;
+}
+
+void RenderTrafoModelInstanced::doRender(QGLShaderProgram &program, const QMatrix4x4 &projection, const QMatrix4x4 &view) {
+    fillBuffer(projection, view);
+
+    // render in instanced groups of size max_instance
+    //(too many instance at once slows down performance or even crashes the program)
+    int rendered_instances = 0;
+    int max = trafo->size() - max_instances;
+    while (rendered_instances < max) {
+        model->renderInstanced(program, max_instances, rendered_instances);
+        glFinish();
+        glFlush();
+        rendered_instances += max_instances;
+        std::cout << "  rendering " << rendered_instances << "/" << trafo->size() << "\r" << std::flush;
+    }
+    model->renderInstanced(program, trafo->size() - rendered_instances);
+    glFinish();
+    glFlush();
+    std::cout << "  rendering done." << trafo->size() << "/" << trafo->size() << std::endl;
+}
+
 void ConturingWidget::storeModel() {
     if (dmcModel) {
         writeToOffFile(positions, indices, "D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/out/motor.off");
@@ -298,8 +408,9 @@ void ConturingWidget::loadTrack() {
 // if (filename.endsWith(".vda")) {
 //     std::ifstream trackfile(filename.toLatin1());
 // }
-
-    LoadVdaFile(trafo.M,"D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/tracks/Einfahrt.vda",trafo.scale, timestep);
+    trafo = unique_ptr<Trafo>(new Trafo());
+    trafo->scale = 1000.0f;
+    LoadVdaFile(trafo->M,"D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/tracks/track.vda",trafo->scale, timestep);
     updateTrafoModel();
 }
 
@@ -318,8 +429,8 @@ void ConturingWidget::loadModel() {
         LoadOffFile(filename.toLatin1(), positions, normals);
 */
     aligned_vector3f positions, normals;
-    LoadOffFile("D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/models/Greifer.off", positions, normals);
-    model = unique_ptr<Model>(new Model(positions, normals, GL_TRIANGLES, true, 1.8));
+    LoadOffFile("D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/models/motor.off", positions, normals);
+    model = unique_ptr<Model>(new Model(positions, normals, GL_TRIANGLES, true, 2.0f));
     updateTrafoModel();
     camera.position = camera.rotation._transformVector(Z_AXIS) + camera.center;
     main->statusBar()->showMessage ("Loading model done.",3000);
@@ -332,10 +443,10 @@ void ConturingWidget::sliderValueChanged(int value) {
     main->t_error_label->setText(to_string(errorThreshold).c_str());
 }
 
-const float ConturingWidget::CAMERA_MOVEMENT_SPEED = 0.0025;
-const float ConturingWidget::CAMERA_SCROLL_FACTOR = 1.2;
-const float ConturingWidget::MIN_ERROR_THRESHOLD = 0;
-const float ConturingWidget::MAX_ERROR_THRESHOLD = 0.0001;
+const float ConturingWidget::CAMERA_MOVEMENT_SPEED = 0.0025f;
+const float ConturingWidget::CAMERA_SCROLL_FACTOR = 1.2f;
+const float ConturingWidget::MIN_ERROR_THRESHOLD = 0.0f;
+const float ConturingWidget::MAX_ERROR_THRESHOLD = 0.0001f;
 
 ConturingWidget::ConturingWidget (CGMainWindow *mainwindow,QWidget* parent ) : QGLWidget (parent) {
     main = mainwindow;
@@ -343,33 +454,18 @@ ConturingWidget::ConturingWidget (CGMainWindow *mainwindow,QWidget* parent ) : Q
     res = DEFAULT_RESOLUTION;
 }
 
-bool ConturingWidget::initShaderProgram(const char *vname, const char *fname, QGLShaderProgram& program) {
-    setlocale(LC_NUMERIC, "C");
-    // shader
-    if (!program.addShaderFromSourceFile(QGLShader::Vertex, vname))
-        return false;
-
-    if (!program.addShaderFromSourceFile(QGLShader::Fragment, fname))
-        return false;
-
-    if (!program.link())
-        return false;
-
-    if (!program.bind())
-        return false;
-
-    return true;
-}
-
 void ConturingWidget::initializeGL() {
     initializeOpenGLFunctions();
     initShaderProgram(":/shaders/vshader.glsl", ":/shaders/fshader.glsl", program);
-    initShaderProgram(":/shaders/vpoints.glsl", ":/shaders/fpoints.glsl", programColor);
-    //initShaderProgram(":/shaders/scan_vertShader.glsl", ":/shaders/scan_fragShader.glsl", programScan);
+    initShaderProgram(":/shaders/vpoints.glsl", ":/shaders/fpoints.glsl", programDebug);
 
     qglClearColor(Qt::black);
     glPointSize(4.0);
     glEnable(GL_DEPTH_TEST);
+
+    //GLint max_size = 0;
+    //glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &max_size);
+    //std::cout << "GL_MAX_3D_TEXTURE_SIZE " << max_size << std::endl;
 
     camera.position = Z_AXIS;
     rotX = rotY = 0;
@@ -383,9 +479,9 @@ void ConturingWidget::initializeGL() {
     cell_level_count = vector<uint>(levels, 0);
 
     trafo_now = 0;
-    trafo.scale = 1.0;
     loadTrack();
     loadModel();
+
     showModel = false;
     showDMCModel = false;
     showEdgeIntesections = false;
@@ -398,10 +494,16 @@ void ConturingWidget::initializeGL() {
 }
 
 void ConturingWidget::updateTrafoModel() {
-    if (!trafo.empty() && model) {
-        model->scale /= trafo.scale;
-        model->init(2.0f, trafo);
+    if (model) {
+        if (trafo) {
+            model->init(2.0f, *trafo);
+            scene = unique_ptr<RenderStrategy>(new RenderTrafoModelInstanced(model.get(), trafo.get(), MAX_INSTANCES));
+            //scene = unique_ptr<RenderStrategy>(new RenderTrafoModel(model.get(), trafo.get(), MAX_INSTANCES));
+        } else {
+            scene = unique_ptr<RenderStrategy>(new RenderSingleModel(model.get()));
+        }
     }
+
 }
 
 void ConturingWidget::bindModel(const Matrix4f& VM, QVector4D color) {
@@ -418,17 +520,17 @@ void ConturingWidget::renderModel(Model* model, const Matrix4f &VM, QVector4D co
 }
 
 void ConturingWidget::bindDebugMesh(Model* model, const Matrix4f& V, bool useVertexColor, QVector4D color) {
-    programColor.bind();
+    programDebug.bind();
     Matrix4f VM = V * model->getModelMatrix();
     Matrix4f PVM = camera.projection * VM;
-    programColor.setUniformValue("uMVPMat",qMat(PVM));
-    programColor.setUniformValue("useVertexColor", useVertexColor);
-    programColor.setUniformValue("uColor", color);
+    programDebug.setUniformValue("uMVPMat",qMat(PVM));
+    programDebug.setUniformValue("useVertexColor", useVertexColor);
+    programDebug.setUniformValue("uColor", color);
 }
 
 void ConturingWidget::renderDebugMesh(Model* model, const Matrix4f &V, bool useVertexColor, QVector4D color) {
     bindDebugMesh(model, V, useVertexColor, color);
-    model->render(programColor);
+    model->render(programDebug);
 }
 
 void ConturingWidget::paintGL() {
@@ -438,8 +540,8 @@ void ConturingWidget::paintGL() {
     Matrix4f V = camera.getViewMatrix();
     if (model && showModel) {
         Matrix4f VM = V * model->getModelMatrix();
-        if (!trafo.empty())
-            VM *= trafo[trafo_now];
+        if (trafo)
+            VM *= (*trafo)[trafo_now];
         renderModel(model.get(), VM, QVector4D(0.75,0.75,0.75,1.0));
     }
     if (dmcModel && showDMCModel) {
@@ -460,10 +562,10 @@ void ConturingWidget::paintGL() {
     if (dmcVertices && showDMCVertices) {
         bindDebugMesh(dmcVertices.get(), V, true);
         if (showCells)
-            dmcVertices->render(programColor, v_offset[selectedLevel][selectedCell.x][selectedCell.y][selectedCell.z],
+            dmcVertices->render(programDebug, v_offset[selectedLevel][selectedCell.x][selectedCell.y][selectedCell.z],
                                 v_count[selectedLevel][selectedCell.x][selectedCell.y][selectedCell.z]);
         else {
-            dmcVertices->render(programColor, v_offset[selectedLevel][0][0][0],
+            dmcVertices->render(programDebug, v_offset[selectedLevel][0][0][0],
                                 v_level_count[selectedLevel]);
         }
     }
@@ -473,7 +575,7 @@ void ConturingWidget::paintGL() {
         position *= 2*cellGridRadius;
         cells->setPosition(origin+position);
         bindDebugMesh(cells.get(), V, false);
-        cells->render(programColor, selectedLevel*CELL_EDGES_VERTEX_COUNT, CELL_EDGES_VERTEX_COUNT);
+        cells->render(programDebug, selectedLevel*CELL_EDGES_VERTEX_COUNT, CELL_EDGES_VERTEX_COUNT);
     }
 }
 
@@ -483,10 +585,10 @@ void ConturingWidget::resizeGL(int width, int height) {
     glViewport(0,0,w,h);
     if (w > h) {
         float ratio = w/(float) h;
-        camera.perspective(45.0f,ratio,0.1,100);
+        camera.perspective(45.0f,ratio,0.1f,100.0f);
     } else {
         float ratio = h/(float) w;
-        camera.perspective(45.0f,ratio,0.1,100);
+        camera.perspective(45.0f,ratio,0.1f,100.0f);
     }
     updateGL();
 }
@@ -573,11 +675,11 @@ void ConturingWidget::keyPressEvent(QKeyEvent* event) {
     cout << selectedCell.x << " " << selectedCell.y <<  " " << selectedCell.z << endl;
 
     switch (event->key()) {
-    case Qt::Key_Right: trafo_now += 1; if (trafo_now >= (int) trafo.size()) trafo_now = trafo.size()-1; break;
+    case Qt::Key_Right: trafo_now += 1; if (trafo_now >= (int) trafo->size()) trafo_now = trafo->size()-1; break;
     case Qt::Key_Left: trafo_now -= 1; if (trafo_now < 0) trafo_now = 0; break;
-    case Qt::Key_Up: trafo_now += 10; if (trafo_now >= (int) trafo.size()) trafo_now = trafo.size()-1; break;
+    case Qt::Key_Up: trafo_now += 10; if (trafo_now >= (int) trafo->size()) trafo_now = trafo->size()-1; break;
     case Qt::Key_Down: trafo_now -= 10; if (trafo_now < 0) trafo_now = 0; break;
-    case Qt::Key_PageUp: trafo_now += 1000; if (trafo_now >= (int) trafo.size()) trafo_now = trafo.size()-1; break;
+    case Qt::Key_PageUp: trafo_now += 1000; if (trafo_now >= (int) trafo->size()) trafo_now = trafo->size()-1; break;
     case Qt::Key_PageDown: trafo_now -= 1000; if (trafo_now < 0) trafo_now = 0; break;
     }
     std::cout << trafo_now << std::endl;
@@ -645,29 +747,10 @@ void ConturingWidget::createDMCMesh() {
                   + to_string(indices.size()/3) + " Triangles").c_str() << std::endl;
 }
 
-void ConturingWidget::render(QGLShaderProgram& program, const QMatrix4x4 &projection, const QMatrix4x4 &view) const {
-    QMatrix4x4 PV = projection * view;
-    Matrix4f M = model->getModelMatrix();
-    if (trafo.empty()) {
-        QMatrix4x4 qM = qMat(M);
-        program.setUniformValue("uMVPMat", PV*qM);
-        program.setUniformValue("uNMat", qM.normalMatrix());
-        model->render(program);
-    } else {
-        for (uint i = 0; i < trafo.size(); ++i) {
-            Matrix4f M_trafo = M * trafo[i];
-            QMatrix4x4 qM_trafo = qMat(M_trafo);
-            program.setUniformValue("uMVPMat", PV * qM_trafo);
-            program.setUniformValue("uNMat", qM_trafo.normalMatrix());
-            model->render(program);
-        }
-    }
-}
-
 void ConturingWidget::dmc() {
     aligned_vector3f positions, colors;
     DMC = unique_ptr<DualMarchingCubes>(new DualMarchingCubes());
-    DMC->conturing(this, voxelGridRadius, DEFAULT_RESOLUTION, DEFAULT_WORK_RESOLUTION);
+    DMC->conturing(scene.get(), voxelGridRadius, DEFAULT_RESOLUTION, DEFAULT_WORK_RESOLUTION);
     //DMC->collapse(0.0f);
     //DMC->signSampler->inside(voxelGridRadius, positions);
     //inGridPoints = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
@@ -686,11 +769,11 @@ void ConturingWidget::dmc() {
                 for (uint z = 0; z < levelSize; ++z)
                     v_level_count[i] += v_count[i][x][y][z];
     }*/
-    createDMCMesh();/*
-    positions.clear();
-    colors.clear();
-    DMC->sampler->edgeIntersections(voxelGridRadius, positions, colors);
-    edgeIntersections = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));*/
+    createDMCMesh();
+    //positions.clear();
+    //colors.clear();
+    //DMC->sampler->edgeIntersections(voxelGridRadius, positions, colors);
+    //edgeIntersections = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
 /*
     main->statusBar()->showMessage("generate vertex model...");
     std::cout << "generate vertex model..." << std::endl;

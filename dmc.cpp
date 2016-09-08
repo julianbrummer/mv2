@@ -1010,7 +1010,7 @@ void DualMarchingCubes::bfs(DMCOctreeAction& action, bool processEmptyNodes) con
     // empty cells for homogeneous nodes without children
     vector<DMCOctreeNode*> dummy(leaf_level+1, nullptr);
     if (processEmptyNodes) {
-        for (int i = 0; i <= leaf_level; ++i)
+        for (uint i = 0; i <= leaf_level; ++i)
             dummy[i] = new DMCOctreeNode(i);
     }
 
@@ -1045,7 +1045,7 @@ void DualMarchingCubes::bfs(DMCOctreeAction& action, bool processEmptyNodes) con
 
     if (processEmptyNodes) {
         // free dummies
-        for (int i = 0; i <= leaf_level; ++i) {
+        for (uint i = 0; i <= leaf_level; ++i) {
             delete dummy[i];
             dummy[i] = nullptr;
         }
@@ -1160,11 +1160,9 @@ void DualMarchingCubes::conturing(uint currentRes, DMCOctreeNode* node, const In
 
 }
 
-bool DualMarchingCubes::conturing(const Renderable *scene, float voxelGridRadius, uint resolution, uint workResolution) {
+bool DualMarchingCubes::conturing(RenderStrategy* scene, float voxelGridRadius, uint resolution, uint workResolution) {
     initializeOpenGLFunctions();
-    if (!initShaderProgram(":/shaders/vEdgeScan.glsl", ":/shaders/fEdgeScan.glsl", programEdgeScan))
-        return false;
-    if (!initShaderProgram(":/shaders/vHermiteScan.glsl", ":/shaders/fHermiteScan.glsl", programHermiteScan))
+    if(!scene->initShaders(programEdgeScan, programHermiteScan))
         return false;
 
     this->scene = scene;
@@ -1194,7 +1192,7 @@ bool DualMarchingCubes::conturing(const Renderable *scene, float voxelGridRadius
     root = unique_ptr<DMCOctreeNode>(new DMCOctreeNode(0));
     conturing(res, root.get(), Index(0));
     signSampler.reset();
-    //sampler.reset();
+    sampler.reset();
 /*
     CompressedHermiteScanner hermiteScanner(workResolution);
     hermiteScanner.program = &programHermiteScan;

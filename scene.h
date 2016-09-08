@@ -16,7 +16,7 @@ public:
 
     Trafo() : scale(1.0) {}
 
-    uint size() const {
+    size_t size() const {
         return M.size();
     }
     bool empty() const {
@@ -62,8 +62,10 @@ public:
           bool centerAndScale = true, int mode = GL_TRIANGLES, float size = 1.0f);
     Model(const aligned_vector3f& positions,
           int mode = GL_TRIANGLES, bool centerAndScale = true, float size = 1.0f);
-    void render(QGLShaderProgram& program);
-    void render(QGLShaderProgram &program, GLint first, GLint count);
+    void render(QGLShaderProgram& program) const;
+    void render(QGLShaderProgram &program, GLint first, GLint count) const;
+    void renderInstanced(QGLShaderProgram& program, GLsizei instanceCount, GLuint baseInstance = 0) const;
+    void renderInstanced(QGLShaderProgram& program, GLint first, GLsizei count, GLsizei instanceCount, GLuint baseInstance = 0) const;
     Matrix4f getModelMatrix() const;
     Vector3f center;
     float scale;

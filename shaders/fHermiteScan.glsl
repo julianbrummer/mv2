@@ -13,7 +13,8 @@ uniform int res;
 in vec3 n;
 
 //uint eps = max(res/256,1);
-const uint eps = 4;
+const uint eps = 4; // works well for 1024
+//const uint eps = 1;
 
 void writeToTex(ivec3 coord, uvec3 normal, uint d) {
     d = d << 24; // distance from grid point [0..1) -> [1..255] 1. byte
@@ -21,6 +22,7 @@ void writeToTex(ivec3 coord, uvec3 normal, uint d) {
     d += (normal.y << 8); // 3. byte
     d += normal.z; // 4. byte
     if(gl_FrontFacing) {
+        //imageAtomicCompSwap(tex[0], coord, 0, d);
         if (imageAtomicCompSwap(tex[0], coord, 0, d) != 0) //just write if current = 0
             imageAtomicMin(tex[0], coord, d); // current != 0
     } else {
@@ -31,6 +33,7 @@ void writeToTex(ivec3 coord, uvec3 normal, uint d) {
 layout(index=0) subroutine (writeToTexture) void writeFromXView(int snap, uint deviation, uvec3 n) {
     //  255 = 1      255 = 1
     //-----|------------|------
+
     if (deviation <= eps) {
         writeToTex(ivec3(snap-1,gl_FragCoord.y,gl_FragCoord.x), n, 255);
     } else if (deviation >= 256-eps) {
@@ -77,7 +80,7 @@ void main() {
     uvec3 normal = uvec3((normalize(n)+vec3(1))*0.5*255+0.5); // [-1..1]^3 -> [0..255]^3
     writeToTextureFromView(snap, d, normal);
 
-    //imageAtomicExchange(tex[0], ivec3(159,29,254), 100);
+    //imageAtomicExchange(tex[1], ivec3(1,1,1), 100);
 
 }
 

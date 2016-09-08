@@ -85,7 +85,7 @@ Model::Model(const aligned_vector3f &positions, const vector<uint> &triangles, b
         posAndNormals.push_back(PositionNormal(v2, n));
     }
     VBOInfo posNormal(0,sizeof(Vector3f));
-    vbo = shared_ptr<VBO>(new VBO(posAndNormals, posNormal));
+    vbo = shared_ptr<VBO>(new VBO(posAndNormals, posNormal, GL_STATIC_DRAW));
     if (centerAndScale)
         init(size);
     else {
@@ -101,7 +101,7 @@ Model::Model(const aligned_vector3f &positions, const aligned_vector3f &normals,
         posAndNormals.push_back(PositionNormal(positions[i], normals[i]));
     }
     VBOInfo posNormal(0,sizeof(Vector3f));
-    vbo = shared_ptr<VBO>(new VBO(posAndNormals, posNormal));
+    vbo = shared_ptr<VBO>(new VBO(posAndNormals, posNormal, GL_STATIC_DRAW));
     if (centerAndScale)
         init(size);
     else {
@@ -117,7 +117,7 @@ Model::Model(const aligned_vector3f &positions, const aligned_vector3f &colors, 
         posAndColors.push_back(PositionColor(positions[i], colors[i]));
     }
     VBOInfo posColor(0,-1,sizeof(Vector3f));
-    vbo = shared_ptr<VBO>(new VBO(posAndColors, posColor));
+    vbo = shared_ptr<VBO>(new VBO(posAndColors, posColor, GL_STATIC_DRAW));
     if (centerAndScale)
         init(size);
     else {
@@ -129,7 +129,7 @@ Model::Model(const aligned_vector3f &positions, const aligned_vector3f &colors, 
 Model::Model(const aligned_vector3f &positions, int mode, bool centerAndScale, float size)
         : SceneObject(), mode(mode), positions(positions) {
     VBOInfo posOnly(0,-1,-1);
-    vbo = shared_ptr<VBO>(new VBO(positions, posOnly));
+    vbo = shared_ptr<VBO>(new VBO(positions, posOnly, GL_STATIC_DRAW));
     if (centerAndScale)
         init(size);
     else {
@@ -159,7 +159,7 @@ void Model::init(float size, const Trafo& T) {
     };
 
 
-    for (int t = 0; t < T.size(); ++t) {
+    for (uint t = 0; t < T.size(); ++t) {
         for (int i = 0; i < 8; ++i) {
             positions[8*t+i] = (T[t] * v[i]).block<3,1>(0,0);
         }
@@ -179,7 +179,7 @@ void Model::aabb(const aligned_vector3f& positions, const Trafo& T,
 
     x1 = y1 = z1 =  inf;
     x2 = y2 = z2 = -inf;
-    for (int t = 0; t < T.size(); ++t) {
+    for (uint t = 0; t < T.size(); ++t) {
         for(uint i = 0; i < positions.size(); i++) {
             Vector3f v = (T[t] * positions[i].homogeneous()).block<3,1>(0,0);
             if (v.x() < x1) x1 = v.x();
@@ -228,12 +228,20 @@ Matrix4f Model::getModelMatrix() const {
     return M;
 }
 
-void Model::render(QGLShaderProgram &program) {
+void Model::render(QGLShaderProgram &program) const {
     vbo->render(program, mode);
 }
 
-void Model::render(QGLShaderProgram &program, GLint first, GLint count) {
+void Model::render(QGLShaderProgram &program, GLint first, GLint count) const {
     vbo->render(program, mode, first, count);
+}
+
+void Model::renderInstanced(QGLShaderProgram &program, GLsizei instanceCount, GLuint baseInstance) const {
+    vbo->renderInstanced(program, mode, instanceCount, baseInstance);
+}
+
+void Model::renderInstanced(QGLShaderProgram &program, GLint first, GLint count, GLsizei instanceCount, GLuint baseInstance) const {
+    vbo->renderInstanced(program, mode, first, count, instanceCount, baseInstance);
 }
 
 void Camera::lookAt(const Vector3f &center, const Vector3f &eye, Vector3f &up) {

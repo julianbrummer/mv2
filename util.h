@@ -5,6 +5,7 @@
 #include <QMatrix3x3>
 #include <QMatrix4x4>
 #include <Eigen/Geometry>
+#include <QGLShaderProgram>
 
 using namespace Eigen;
 using namespace std;
@@ -20,4 +21,5 @@ QVector3D qVec(const Vector3f& v);
 
 QVector4D qVec(const Vector4f& v);
 
+bool initShaderProgram(const char *vname, const char *fname, QGLShaderProgram& program);
 #endif // UTIL_H

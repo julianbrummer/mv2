@@ -58,9 +58,11 @@ enum Direction {
 };
 
 
-class Renderable {
+class RenderStrategy {
 public:
-    virtual void render(QGLShaderProgram& program, const QMatrix4x4& projection, const QMatrix4x4& view) const = 0;
+    virtual bool initShaders(QGLShaderProgram& programEdgeScan, QGLShaderProgram& programHermiteScan) const = 0;
+    virtual void render(QGLShaderProgram& program, const QMatrix4x4& projection, const QMatrix4x4& view) = 0;
+    virtual ~RenderStrategy() {}
 };
 
 class Scanner :  protected QOpenGLFunctions_4_3_Core  {
@@ -69,7 +71,7 @@ protected:
     uint slices;
     uint texRes;
     virtual void transferData(Direction dir) = 0;
-    virtual void configureProgram(Direction dir) {}
+    virtual void configureProgram(Direction dir);
 private:
     GLuint fbo;
     void bindTextures();
@@ -79,7 +81,7 @@ public:
 
     QGLShaderProgram* program;
     QMatrix4x4 projection;
-    void scan(const Renderable* scene, Direction dir);
+    void scan(RenderStrategy* scene, Direction dir);
     Scanner(uint texRes, uint slices, int texCount);
     virtual ~Scanner();
 };
@@ -90,7 +92,6 @@ public:
     CompressedEdgeScanner(uint res)
         : Scanner(res+1, res/32 + 1, 1), data(new CompressedEdgeData(res)) {}
     void transferData(Direction dir) override;
-    void configureProgram(Direction dir) override;
 };
 
 class CompressedHermiteScanner :  public Scanner {
@@ -100,7 +101,6 @@ public:
     CompressedHermiteScanner(uint res)
         : Scanner(res+1, res+1, 2), data(new CompressedHermiteData(res)) {}
     void transferData(Direction dir) override;
-    void configureProgram(Direction dir) override;
 };
 
 class CompressedSignSampler : public SignSampler {

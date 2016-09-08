@@ -139,8 +139,8 @@ bool HermiteDataSampler::hasCut(uint orientation, const Index &from) const {
 }
 
 void HermiteDataSampler::edgeIntersections(float voxelGridRadius, aligned_vector3f& positions, aligned_vector3f& colors) {
-    float o = -voxelGridRadius+voxelGridRadius/257;
-    float cellSize = 2*voxelGridRadius/257;
+    float cellSize = 2*voxelGridRadius/size;
+    float o = -voxelGridRadius+cellSize/2;
     Vector3f origin(o,o,o);
     float d = 0.0;
     Vector3f n(0,0,0);

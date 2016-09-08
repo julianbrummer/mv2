@@ -2,8 +2,8 @@
 #define BUFFEROBJECT_H
 
 #include <Eigen/Core>
-#include <QOpenGLFunctions_2_0>
-#include <QOpenGLFunctions_3_1>
+#include <QOpenGLFunctions_4_3_Core>
+#include <QOpenGLFunctions_4_2_Core>
 #include <QGLShaderProgram>
 
 #include <Eigen/Geometry>
@@ -12,21 +12,15 @@
 using namespace Eigen;
 using namespace std;
 
-class UBO  : private QOpenGLFunctions_3_1 {
+class SSBO : private QOpenGLFunctions_4_3_Core {
 public:
-    UBO(int bindingPoint, int std140Size);
+    SSBO(int bindingPoint, int std140Size, int usage);
 
-    template <typename UBO_DATA>
-    UBO& set(int offset, UBO_DATA data) {
-        glBindBuffer(GL_UNIFORM_BUFFER, id);
-        glBufferSubData(GL_UNIFORM_BUFFER, offset, sizeof(UBO_DATA), &data);
-        glBindBuffer(GL_UNIFORM_BUFFER, 0);
-        return *this;
-    }
-
-    ~UBO();
-
-private:
+    SSBO& bufferData(GLsizeiptr size, const GLvoid* data, GLenum usage);
+    SSBO& bufferSubData(GLintptr offset, GLsizeiptr size, const GLvoid* data);
+    void bind();
+    void unBind();
+    ~SSBO();
     GLuint id;
 };
 
@@ -40,21 +34,26 @@ struct VBOInfo {
 };
 
 
-class VBO : private QOpenGLFunctions_2_0 {
+class VBO : private QOpenGLFunctions_4_2_Core {
+private:
+    void bindAttibutes(QGLShaderProgram& program, int positionLocation, int normalLocation, int colorLocation);
+    void unbindAttibutes(QGLShaderProgram& program, int positionLocation, int normalLocation, int colorLocation);
 public:
 
     template <typename VBO_DATA>
-    VBO(const vector<VBO_DATA, aligned_allocator<VBO_DATA>>& data, VBOInfo& info) : info(info) {
+    VBO(const vector<VBO_DATA, aligned_allocator<VBO_DATA>>& data, VBOInfo& info, int usage) : info(info) {
         initializeOpenGLFunctions();
         this->info.elemSize = sizeof(VBO_DATA);
         this->info.size = data.size();
         glGenBuffers(1,&id);
         glBindBuffer(GL_ARRAY_BUFFER,id);
-        glBufferData(GL_ARRAY_BUFFER,data.size()*this->info.elemSize,data.data(), GL_STATIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER,data.size()*this->info.elemSize,data.data(), usage);
     }
 
     void render(QGLShaderProgram& program, int mode);
-    void render(QGLShaderProgram& program, int mode, GLint first, GLint count);
+    void render(QGLShaderProgram& program, int mode, GLint first, GLsizei count);
+    void renderInstanced(QGLShaderProgram& program, int mode, GLsizei instanceCount, GLuint baseInstance = 0);
+    void renderInstanced(QGLShaderProgram& program, int mode, GLint first, GLsizei count, GLsizei instanceCount, GLuint baseInstance = 0);
     ~VBO();
 
     VBOInfo info;

@@ -143,7 +143,7 @@ void Scanner::unbindImages() {
 }
 
 
-void Scanner::scan(const Renderable* scene, Direction dir) {
+void Scanner::scan(RenderStrategy *scene, Direction dir) {
 
     resetTextures();
     bindTextures();
@@ -170,8 +170,7 @@ void Scanner::scan(const Renderable* scene, Direction dir) {
     glDisable(GL_CULL_FACE);
     glDisable(GL_DEPTH_TEST);
     scene->render(*program, projection, view);
-    glFinish();
-    glFlush();
+    glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
     unbindImages();
     transferData(dir);
     glEnable(GL_DEPTH_TEST);
@@ -188,7 +187,7 @@ void CompressedEdgeScanner::transferData(Direction dir) {
     glGetTexImage(GL_TEXTURE_3D, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, &data->cuts[dir][0]);
 }
 
-void CompressedEdgeScanner::configureProgram(Direction dir) {
+void Scanner::configureProgram(Direction dir) {
     uint index = dir;
     glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
 }
@@ -302,11 +301,6 @@ void CompressedHermiteScanner::transferData(Direction dir) {
             break;
     } */
 
-}
-
-void CompressedHermiteScanner::configureProgram(Direction dir) {
-    uint index = dir;
-    glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
 }
 
 

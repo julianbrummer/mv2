@@ -28,3 +28,21 @@ QVector3D qVec(const Vector3f& v) {
 QVector4D qVec(const Vector4f& v) {
     return QVector4D(v[0], v[1], v[2], v[3]);
 }
+
+bool initShaderProgram(const char *vname, const char *fname, QGLShaderProgram& program) {
+    setlocale(LC_NUMERIC, "C");
+    // shader
+    if (!program.addShaderFromSourceFile(QGLShader::Vertex, vname))
+        return false;
+
+    if (!program.addShaderFromSourceFile(QGLShader::Fragment, fname))
+        return false;
+
+    if (!program.link())
+        return false;
+
+    if (!program.bind())
+        return false;
+
+    return true;
+}
