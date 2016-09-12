@@ -10,7 +10,7 @@ subroutine uniform writeToTexture writeToTextureFromView;
 
 layout(r32ui) uniform uimage3D tex[2];
 uniform int res;
-in vec3 n;
+flat in vec3 n;
 
 //uint eps = max(res/256,1);
 const uint eps = 4; // works well for 1024

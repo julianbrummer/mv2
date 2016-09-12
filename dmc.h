@@ -4674,7 +4674,7 @@ private:
     void initQEF(const vector<int>& edges, const Index& cell_index, QEF& qef) const;
     void initQEF(const int8_t frontEdges[], const int8_t backEdges[], uint frontCount,
                  uint backCount, const Index& cell_index, QEF& qef) const;
-    void initQEF(const int8_t edges[], uint count, const Index& cell_index, QEF& qef) const;
+    bool initQEF(const int8_t edges[], uint count, const Index& cell_index, QEF& qef) const;
     void generateVertex(const Index &cell_index, uint8_t level, QEF& qef, Vector3f& v);
     void createVertexNodesFromNormalGroups(DMCOctreeLeaf &leaf, const Index &leaf_index);
     void createVertexNodesFromEdges(DMCOctreeLeaf &leaf, const Index& leaf_index);

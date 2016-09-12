@@ -859,7 +859,9 @@ void DualMarchingCubes::createVertexNodesFromNormalGroups(DMCOctreeLeaf &leaf, c
 */
 }
 
-void DualMarchingCubes::initQEF(const int8_t edges[], uint count, const Index& cell_index, QEF& qef) const {
+bool DualMarchingCubes::initQEF(const int8_t edges[], uint count, const Index& cell_index, QEF& qef) const {
+    //if (cell_index.x == 247 && cell_index.y == 56 && cell_index.z == 250)
+    //    std::cout << "247,56,250" << std::endl;
     uint cuts = 0;
     for (uint i = 0; i < count; ++i) {
         int e = edges[i];
@@ -871,16 +873,22 @@ void DualMarchingCubes::initQEF(const int8_t edges[], uint count, const Index& c
         uint orientation = edge_orientation[e];
         bool s0 = signSampler->sign(frontCorner);
         bool s1 = signSampler->sign(backCorner);
+        //bool fcut = sampler->hasFrontCut(orientation, frontCorner);
+        //bool bcut = sampler->hasBackCut(orientation, frontCorner);
+
         if ((!s0 && s1 && sampler->frontEdgeInfo(orientation, frontCorner, d, n))
                 || (s0 && !s1 && sampler->backEdgeInfo(orientation, frontCorner, d, n))) {
             addToQEF(frontCorner, orientation, d, n, qef);
             cuts++;
         }
     }
-    if (cuts == 0)
-        std::cout << "0 cuts" << std::endl;
-    else
+    if (cuts == 0) {
+        //std::cout << "0 cuts " << cell_index.x << ", " << cell_index.y << ", " << cell_index.z << std::endl;
+        return false;
+    } else {
         qef.m /= cuts;
+        return true;
+    }
 }
 
 void DualMarchingCubes::createVertexNodes(DMCOctreeLeaf* leaf, const Index &leaf_index) {
@@ -898,8 +906,13 @@ void DualMarchingCubes::createVertexNodes(DMCOctreeLeaf* leaf, const Index &leaf
         int edge = edgeTable[leaf->signConfig][i];
         if (edge < 0) {
             VertexNode* vNode = new VertexNode();
-            initQEF(vEdges, count, leaf_index, *(vNode->qef));
-            generateVertex(leaf_index, leaf_level, *(vNode->qef), vNode->v);
+            if (initQEF(vEdges, count, leaf_index, *(vNode->qef))) {
+                generateVertex(leaf_index, leaf_level, *(vNode->qef), vNode->v);
+            } else {
+                vNode->v = Vector3f(leaf_index.x+0.5,leaf_index.y+0.5, leaf_index.z+0.5);
+                vNode->v /= res;
+            }
+
             vNode->computeError();
             vNode->collapsable = true; // a leaf node is always collapsable
             // assign vertex index to edges
@@ -907,6 +920,7 @@ void DualMarchingCubes::createVertexNodes(DMCOctreeLeaf* leaf, const Index &leaf
                 leaf->edgeVertices[vEdges[e]] = leaf->vertices.size();
             }
             leaf->vertices.push_back(shared_ptr<VertexNode>(vNode));
+
             count = 0;
             if (edge == -2)
                 break;

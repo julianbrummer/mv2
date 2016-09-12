@@ -21,5 +21,5 @@ QVector3D qVec(const Vector3f& v);
 
 QVector4D qVec(const Vector4f& v);
 
-bool initShaderProgram(const char *vname, const char *fname, QGLShaderProgram& program);
+bool initShaderProgram(QGLShaderProgram& program, const char *vname, const char *fname, const char *gname = nullptr);
 #endif // UTIL_H

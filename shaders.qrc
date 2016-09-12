@@ -6,6 +6,9 @@
         <file>shaders/fpoints.glsl</file>
         <file>shaders/vEdgeScan.glsl</file>
         <file>shaders/vHermiteScan.glsl</file>
+        <file>shaders/vPatchScan.glsl</file>
+        <file>shaders/gEdgePatchScan.glsl</file>
+        <file>shaders/gHermitePatchScan.glsl</file>
         <file>shaders/fEdgeScan.glsl</file>
         <file>shaders/fHermiteScan.glsl</file>
     </qresource>

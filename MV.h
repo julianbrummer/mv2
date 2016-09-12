@@ -74,14 +74,19 @@ class RenderTrafoModelInstanced : public DefaultRenderStrategy {
 private:
     const Model* model;
     const Trafo* trafo;
-    SSBO trafo_buffer, trafo_normal_buffer;
     int max_instances;
-    void fillBuffer(const QMatrix4x4 &projection, const QMatrix4x4 &view);
 public:
     RenderTrafoModelInstanced(const Model *model, const Trafo *trafo, int max_instances);
 protected:
     virtual void subroutineSelection(GLuint index[2]);
     void doRender(QGLShaderProgram& program, const QMatrix4x4& projection, const QMatrix4x4& view) override;
+};
+
+class RenderSparseTrafoModel : public RenderTrafoModelInstanced {
+public:
+    RenderSparseTrafoModel(const Model *model, const Trafo *trafo, int max_instances)
+        : RenderTrafoModelInstanced(model, trafo, max_instances) {}
+    bool initShaders(QGLShaderProgram &programEdgeScan, QGLShaderProgram &programHermiteScan) const override;
 };
 
 class ConturingWidget : public QGLWidget, public QOpenGLFunctions_2_0 {
@@ -157,7 +162,7 @@ public:
     Quaternionf trackball(const Vector3f& u, const Vector3f& v);
 
     void updateThreshold(float s);
-    void updateTrafoModel();
+
 
     unique_ptr<Model> model, edgeIntersections, inGridPoints, outGridPoints, dmcVertices, dmcModel, cells;
     unique_ptr<RenderStrategy> scene;
@@ -176,6 +181,7 @@ public:
     qreal timestep;
     unique_ptr<Trafo> trafo;
     int trafo_now;
+    unique_ptr<SSBO> trafo_buffer, trafo_normal_buffer;
 
 protected:
 
@@ -192,6 +198,9 @@ protected:
     int oldX,oldY,button;
 
 private:
+    void updateTrafoModel();
+    void fillTrafoBuffers();
+
     void bindModel(const Matrix4f &VM, QVector4D color);
     void renderModel(Model* model, const Matrix4f &VM, QVector4D color);
     void bindDebugMesh(Model* model, const Matrix4f &V, bool useVertexColor = false, QVector4D color = QVector4D(1,1,1,1));

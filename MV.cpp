@@ -283,9 +283,9 @@ void writeToStlFile(const std::vector<Vertex>& T, const char *filename) {
 */
 
 bool DefaultRenderStrategy::initShaders(QGLShaderProgram &programEdgeScan, QGLShaderProgram &programHermiteScan) const {
-    if (!initShaderProgram(":/shaders/vEdgeScan.glsl", ":/shaders/fEdgeScan.glsl", programEdgeScan))
+    if (!initShaderProgram(programEdgeScan, ":/shaders/vEdgeScan.glsl", ":/shaders/fEdgeScan.glsl"))
         return false;
-    if (!initShaderProgram(":/shaders/vHermiteScan.glsl", ":/shaders/fHermiteScan.glsl", programHermiteScan))
+    if (!initShaderProgram(programHermiteScan, ":/shaders/vHermiteScan.glsl", ":/shaders/fHermiteScan.glsl"))
         return false;
     return true;
 }
@@ -313,7 +313,8 @@ void RenderSingleModel::doRender(QGLShaderProgram &program, const QMatrix4x4 &pr
     QMatrix4x4 PV = projection * view;
     Matrix4f M = model->getModelMatrix();
     QMatrix4x4 qM = qMat(M);
-    program.setUniformValue("uMVPMat", PV*qM);
+    program.setUniformValue("uVPMat", PV);
+    program.setUniformValue("uMMat", qM);
     program.setUniformValue("uNMat", qM.normalMatrix());
     model->render(program);
 }
@@ -326,10 +327,11 @@ RenderTrafoModel::RenderTrafoModel(const Model* model, const Trafo* trafo, int p
 
 void RenderTrafoModel::doRender(QGLShaderProgram &program, const QMatrix4x4 &projection, const QMatrix4x4 &view) {
     QMatrix4x4 PV = projection * view;
+    program.setUniformValue("uVPMat", PV);
     for (uint i = 0; i < trafo->size(); ++i) {
         Matrix4f M_trafo = model->getModelMatrix() * (*trafo)[i];
         QMatrix4x4 qM = qMat(M_trafo);
-        program.setUniformValue("uMVPMat", PV * qM);
+        program.setUniformValue("uMMat", qM);
         program.setUniformValue("uNMat", qM.normalMatrix());
         model->render(program);
         glFinish();
@@ -337,35 +339,14 @@ void RenderTrafoModel::doRender(QGLShaderProgram &program, const QMatrix4x4 &pro
         if (i % progress_update_instances == 0)
             std::cout << "  rendering " << i << "/" << trafo->size() << "\r" << std::flush;
     }
-    std::cout << "  rendering done." << trafo->size() << "/" << trafo->size() << std::endl;
+    std::cout << "  rendering done. " << trafo->size() << "/" << trafo->size() << std::endl;
 }
 
 RenderTrafoModelInstanced::RenderTrafoModelInstanced(const Model* model, const Trafo* trafo, int max_instances)
-        : model(model), trafo(trafo), trafo_buffer(1, trafo->size()*64, GL_DYNAMIC_DRAW),
-          trafo_normal_buffer(2, trafo->size()*48, GL_STATIC_DRAW), max_instances(max_instances) {
+        : model(model), trafo(trafo), max_instances(max_instances) {
     initializeOpenGLFunctions();
-    std::cout << "fill SSBO with normal matrices" << std::endl;
-    trafo_normal_buffer.bind();
-    for (uint i = 0; i < trafo->size(); ++i) {
-        Matrix4f M_trafo = model->getModelMatrix() * (*trafo)[i];
-        QMatrix3x3 nMat = qMat(M_trafo).normalMatrix();
-        QMatrix4x4 padded_nMat = QMatrix4x4(nMat);
-        trafo_normal_buffer.bufferSubData(i*48, 48, padded_nMat.data());
-    }
-    trafo_normal_buffer.unBind();
 }
 
-void RenderTrafoModelInstanced::fillBuffer(const QMatrix4x4 &projection, const QMatrix4x4 &view) {
-    std::cout << "  fill SSBO with transformation matrices" << std::endl;
-    QMatrix4x4 PV = projection * view;
-    trafo_buffer.bind();
-    for (uint i = 0; i < trafo->size(); ++i) {
-        Matrix4f M_trafo = model->getModelMatrix() * (*trafo)[i];
-        QMatrix4x4 mvpMat = PV * qMat(M_trafo);
-        trafo_buffer.bufferSubData(i*64, 64, mvpMat.data());
-    }
-    trafo_buffer.unBind();
-}
 
 void RenderTrafoModelInstanced::subroutineSelection(GLuint index[2]) {
     index[0] = 1;
@@ -373,8 +354,8 @@ void RenderTrafoModelInstanced::subroutineSelection(GLuint index[2]) {
 }
 
 void RenderTrafoModelInstanced::doRender(QGLShaderProgram &program, const QMatrix4x4 &projection, const QMatrix4x4 &view) {
-    fillBuffer(projection, view);
-
+    QMatrix4x4 PV = projection * view;
+    program.setUniformValue("uVPMat", PV);
     // render in instanced groups of size max_instance
     //(too many instance at once slows down performance or even crashes the program)
     int rendered_instances = 0;
@@ -389,7 +370,26 @@ void RenderTrafoModelInstanced::doRender(QGLShaderProgram &program, const QMatri
     model->renderInstanced(program, trafo->size() - rendered_instances);
     glFinish();
     glFlush();
-    std::cout << "  rendering done." << trafo->size() << "/" << trafo->size() << std::endl;
+    std::cout << "  rendering done. " << trafo->size() << "/" << trafo->size() << std::endl;
+}
+
+bool RenderSparseTrafoModel::initShaders(QGLShaderProgram &programEdgeScan, QGLShaderProgram &programHermiteScan) const {
+    if (!initShaderProgram(programEdgeScan, ":/shaders/vPatchScan.glsl", ":/shaders/fEdgeScan.glsl", ":/shaders/gEdgePatchScan.glsl"))
+        return false;
+    if (!initShaderProgram(programHermiteScan, ":/shaders/vPatchScan.glsl", ":/shaders/fHermiteScan.glsl", ":/shaders/gHermitePatchScan.glsl"))
+        return false;
+    return true;
+}
+
+const float ConturingWidget::CAMERA_MOVEMENT_SPEED = 0.0025f;
+const float ConturingWidget::CAMERA_SCROLL_FACTOR = 1.2f;
+const float ConturingWidget::MIN_ERROR_THRESHOLD = 0.0f;
+const float ConturingWidget::MAX_ERROR_THRESHOLD = 0.0001f;
+
+ConturingWidget::ConturingWidget (CGMainWindow *mainwindow,QWidget* parent ) : QGLWidget (parent) {
+    main = mainwindow;
+    errorThreshold = MIN_ERROR_THRESHOLD;
+    res = DEFAULT_RESOLUTION;
 }
 
 void ConturingWidget::storeModel() {
@@ -409,8 +409,8 @@ void ConturingWidget::loadTrack() {
 //     std::ifstream trackfile(filename.toLatin1());
 // }
     trafo = unique_ptr<Trafo>(new Trafo());
-    trafo->scale = 1000.0f;
-    LoadVdaFile(trafo->M,"D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/tracks/track.vda",trafo->scale, timestep);
+    trafo->scale = 1.0f;
+    LoadVdaFile(trafo->M,"D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/tracks/Einfahrt.vda",trafo->scale, timestep);
     updateTrafoModel();
 }
 
@@ -429,7 +429,7 @@ void ConturingWidget::loadModel() {
         LoadOffFile(filename.toLatin1(), positions, normals);
 */
     aligned_vector3f positions, normals;
-    LoadOffFile("D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/models/motor.off", positions, normals);
+    LoadOffFile("D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/models/Greifer.off", positions, normals);
     model = unique_ptr<Model>(new Model(positions, normals, GL_TRIANGLES, true, 2.0f));
     updateTrafoModel();
     camera.position = camera.rotation._transformVector(Z_AXIS) + camera.center;
@@ -438,26 +438,55 @@ void ConturingWidget::loadModel() {
     updateGL();
 }
 
+void ConturingWidget::updateTrafoModel() {
+    if (model) {
+        if (trafo) {
+            model->init(2.0f, *trafo);
+            fillTrafoBuffers();
+            scene = unique_ptr<RenderStrategy>(new RenderTrafoModelInstanced(model.get(), trafo.get(), MAX_INSTANCES));
+            //scene = unique_ptr<RenderStrategy>(new RenderTrafoModel(model.get(), trafo.get(), MAX_INSTANCES));
+            scene = unique_ptr<RenderStrategy>(new RenderSparseTrafoModel(model.get(), trafo.get(), MAX_INSTANCES));
+
+
+        } else {
+            scene = unique_ptr<RenderStrategy>(new RenderSingleModel(model.get()));
+        }
+    }
+
+}
+
+void ConturingWidget::fillTrafoBuffers() {
+    std::cout << "  fill SSBO with matrices" << std::endl;
+    trafo_buffer = unique_ptr<SSBO>(new SSBO(1, trafo->size()*64, GL_STATIC_DRAW));
+    trafo_buffer->bind();
+    float values[16];
+    for (uint i = 0; i < trafo->size(); ++i) {
+        Matrix4f M_trafo = model->getModelMatrix() * (*trafo)[i];
+        Map<Matrix4f>(&values[0], 4, 4) = M_trafo;
+        trafo_buffer->bufferSubData(i*64, 64, values);
+    }
+    trafo_buffer->unBind();
+
+    trafo_normal_buffer = unique_ptr<SSBO>(new SSBO(2, trafo->size()*48, GL_STATIC_DRAW));
+    trafo_normal_buffer->bind();
+    for (uint i = 0; i < trafo->size(); ++i) {
+        Matrix4f M_trafo = model->getModelMatrix() * (*trafo)[i];
+        QMatrix3x3 nMat = qMat(M_trafo).normalMatrix();
+        QMatrix4x4 padded_nMat = QMatrix4x4(nMat);
+        trafo_normal_buffer->bufferSubData(i*48, 48, padded_nMat.data());
+    }
+    trafo_normal_buffer->unBind();
+}
+
 void ConturingWidget::sliderValueChanged(int value) {
     updateThreshold((float)value/CGMainWindow::SLIDER_GRANULARITY);
     main->t_error_label->setText(to_string(errorThreshold).c_str());
 }
 
-const float ConturingWidget::CAMERA_MOVEMENT_SPEED = 0.0025f;
-const float ConturingWidget::CAMERA_SCROLL_FACTOR = 1.2f;
-const float ConturingWidget::MIN_ERROR_THRESHOLD = 0.0f;
-const float ConturingWidget::MAX_ERROR_THRESHOLD = 0.0001f;
-
-ConturingWidget::ConturingWidget (CGMainWindow *mainwindow,QWidget* parent ) : QGLWidget (parent) {
-    main = mainwindow;
-    errorThreshold = MIN_ERROR_THRESHOLD;
-    res = DEFAULT_RESOLUTION;
-}
-
 void ConturingWidget::initializeGL() {
     initializeOpenGLFunctions();
-    initShaderProgram(":/shaders/vshader.glsl", ":/shaders/fshader.glsl", program);
-    initShaderProgram(":/shaders/vpoints.glsl", ":/shaders/fpoints.glsl", programDebug);
+    initShaderProgram(program, ":/shaders/vshader.glsl", ":/shaders/fshader.glsl");
+    initShaderProgram(programDebug, ":/shaders/vpoints.glsl", ":/shaders/fpoints.glsl");
 
     qglClearColor(Qt::black);
     glPointSize(4.0);
@@ -493,18 +522,6 @@ void ConturingWidget::initializeGL() {
     selectedLevel = 0;
 }
 
-void ConturingWidget::updateTrafoModel() {
-    if (model) {
-        if (trafo) {
-            model->init(2.0f, *trafo);
-            scene = unique_ptr<RenderStrategy>(new RenderTrafoModelInstanced(model.get(), trafo.get(), MAX_INSTANCES));
-            //scene = unique_ptr<RenderStrategy>(new RenderTrafoModel(model.get(), trafo.get(), MAX_INSTANCES));
-        } else {
-            scene = unique_ptr<RenderStrategy>(new RenderSingleModel(model.get()));
-        }
-    }
-
-}
 
 void ConturingWidget::bindModel(const Matrix4f& VM, QVector4D color) {
     program.bind();
@@ -754,9 +771,9 @@ void ConturingWidget::dmc() {
     //DMC->collapse(0.0f);
     //DMC->signSampler->inside(voxelGridRadius, positions);
     //inGridPoints = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
-    positions.clear();
-    colors.clear();
-    /*
+    //positions.clear();
+    //colors.clear();
+/*
     std::cout << " get vertices " << std::endl;
     DMC->vertices(positions, colors, v_offset, v_count);
     dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
@@ -768,7 +785,8 @@ void ConturingWidget::dmc() {
             for (uint y = 0; y < levelSize; ++y)
                 for (uint z = 0; z < levelSize; ++z)
                     v_level_count[i] += v_count[i][x][y][z];
-    }*/
+    }
+    */
     createDMCMesh();
     //positions.clear();
     //colors.clear();

@@ -29,13 +29,17 @@ QVector4D qVec(const Vector4f& v) {
     return QVector4D(v[0], v[1], v[2], v[3]);
 }
 
-bool initShaderProgram(const char *vname, const char *fname, QGLShaderProgram& program) {
+bool initShaderProgram(QGLShaderProgram& program, const char *vname, const char *fname, const char *gname) {
     setlocale(LC_NUMERIC, "C");
-    // shader
+
     if (!program.addShaderFromSourceFile(QGLShader::Vertex, vname))
         return false;
 
     if (!program.addShaderFromSourceFile(QGLShader::Fragment, fname))
+        return false;
+
+    // optional
+    if (gname && !program.addShaderFromSourceFile(QGLShader::Geometry, gname))
         return false;
 
     if (!program.link())

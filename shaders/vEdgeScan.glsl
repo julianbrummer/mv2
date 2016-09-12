@@ -8,23 +8,24 @@ precision mediump float;
 
 in vec3 a_position;
 
-uniform mat4 uMVPMat;
+uniform mat4 uVPMat;
+uniform mat4 uMMat;
 
-subroutine mat4 getMVPMat();
-subroutine uniform getMVPMat mvpMatFromLocation;
+subroutine mat4 getMMat();
+subroutine uniform getMMat mMatFromLocation;
 
 layout(std140, binding = 1) buffer trafo {
-    mat4 mvpMat[];
+    mat4 mMat[];
 };
 
-layout(index=0) subroutine (getMVPMat) mat4 mvpMatFromUniform() {
-    return uMVPMat;
+layout(index=0) subroutine (getMMat) mat4 mMatFromUniform() {
+    return uMMat;
 }
 
-layout(index=1) subroutine (getMVPMat) mat4 mvpMatFromBuffer() {
-    return mvpMat[gl_InstanceID + gl_BaseInstanceARB];
+layout(index=1) subroutine (getMMat) mat4 mMatFromBuffer() {
+    return mMat[gl_InstanceID + gl_BaseInstanceARB];
 }
 
 void main() {
-    gl_Position = mvpMatFromLocation() * vec4(a_position,1.0);
+    gl_Position = uVPMat * mMatFromLocation() * vec4(a_position,1.0);
 }
