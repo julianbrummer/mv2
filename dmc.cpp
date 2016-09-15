@@ -150,6 +150,10 @@ bool DMCOctreeLeaf::out() const {
     return signConfig == 0;
 }
 
+void DMCOctreeLeaf::flipSign(uint i) {
+    signConfig ^= (1 << i);
+}
+
 void DMCVerticesBuilder::handle(const DMCOctreeCell *node, const Index &index) {
     // push vertices
     offset[node->level][index.x][index.y][index.z] = positions.size();
@@ -859,44 +863,34 @@ void DualMarchingCubes::createVertexNodesFromNormalGroups(DMCOctreeLeaf &leaf, c
 */
 }
 
-bool DualMarchingCubes::initQEF(const int8_t edges[], uint count, const Index& cell_index, QEF& qef) const {
-    //if (cell_index.x == 247 && cell_index.y == 56 && cell_index.z == 250)
-    //    std::cout << "247,56,250" << std::endl;
+void DualMarchingCubes::initQEF(const int8_t edges[], uint count, const Index& cell_index, QEF& qef) {
     uint cuts = 0;
     for (uint i = 0; i < count; ++i) {
         int e = edges[i];
-        Index frontCorner = cell_index + corner_delta[edge_corners[e][0]];
-        Index backCorner = cell_index + corner_delta[edge_corners[e][1]];
+        const Index frontCorner = cell_index + corner_delta[edge_corners[e][0]];
+        const Index backCorner = cell_index + corner_delta[edge_corners[e][1]];
 
         Vector3f n;
         float d;
         uint orientation = edge_orientation[e];
         bool s0 = signSampler->sign(frontCorner);
         bool s1 = signSampler->sign(backCorner);
-        //bool fcut = sampler->hasFrontCut(orientation, frontCorner);
-        //bool bcut = sampler->hasBackCut(orientation, frontCorner);
-
         if ((!s0 && s1 && sampler->frontEdgeInfo(orientation, frontCorner, d, n))
                 || (s0 && !s1 && sampler->backEdgeInfo(orientation, frontCorner, d, n))) {
             addToQEF(frontCorner, orientation, d, n, qef);
             cuts++;
         }
     }
-    if (cuts == 0) {
-        //std::cout << "0 cuts " << cell_index.x << ", " << cell_index.y << ", " << cell_index.z << std::endl;
-        return false;
-    } else {
-        qef.m /= cuts;
-        return true;
-    }
+
+    qef.m /= cuts;
 }
 
 void DualMarchingCubes::createVertexNodes(DMCOctreeLeaf* leaf, const Index &leaf_index) {
-
     //if (sampler->hasComplexEdge(leaf_index))
         //createVertexNodesFromNormalGroups(leaf, leaf_index);
         //createVertexNodesFromEdges(leaf, leaf_index);
     //else
+
     uint vCount = vertexCount[leaf->signConfig];
     if (vCount == 0)
         return;
@@ -906,13 +900,8 @@ void DualMarchingCubes::createVertexNodes(DMCOctreeLeaf* leaf, const Index &leaf
         int edge = edgeTable[leaf->signConfig][i];
         if (edge < 0) {
             VertexNode* vNode = new VertexNode();
-            if (initQEF(vEdges, count, leaf_index, *(vNode->qef))) {
-                generateVertex(leaf_index, leaf_level, *(vNode->qef), vNode->v);
-            } else {
-                vNode->v = Vector3f(leaf_index.x+0.5,leaf_index.y+0.5, leaf_index.z+0.5);
-                vNode->v /= res;
-            }
-
+            initQEF(vEdges, count, leaf_index, *(vNode->qef));
+            generateVertex(leaf_index, leaf_level, *(vNode->qef), vNode->v);
             vNode->computeError();
             vNode->collapsable = true; // a leaf node is always collapsable
             // assign vertex index to edges
@@ -951,6 +940,7 @@ bool DualMarchingCubes::createOctreeNodes(DMCOctreeNode* parent, uint parent_siz
             Index child_index = parent_index + child_size*child_origin[i];
             unique_ptr<DMCOctreeNode> child(new DMCOctreeNode(parent->level+1));
             homogeneous &= createOctreeNodes(child.get(), child_size, child_index);
+
             parent->children[i] = move(child);
         }
     }
@@ -958,7 +948,6 @@ bool DualMarchingCubes::createOctreeNodes(DMCOctreeNode* parent, uint parent_siz
         parent->removeChildren();
 
     clusterCell(parent_index, parent);
-
 
     return homogeneous;
 }
@@ -1169,7 +1158,9 @@ void DualMarchingCubes::conturing(uint currentRes, DMCOctreeNode* node, const In
         sampler.reset();
         sampler = unique_ptr<HermiteDataSampler>(new CompressedHermiteSampler(hermiteScanner.data, node_index));
         std::cout << "create octree (" << currentRes << ")" << std::endl;
+
         createOctreeNodes(node, currentRes, node_index);
+
     }
 
 }
@@ -1205,8 +1196,8 @@ bool DualMarchingCubes::conturing(RenderStrategy* scene, float voxelGridRadius, 
 
     root = unique_ptr<DMCOctreeNode>(new DMCOctreeNode(0));
     conturing(res, root.get(), Index(0));
-    signSampler.reset();
-    sampler.reset();
+    //signSampler.reset();
+    //sampler.reset();
 /*
     CompressedHermiteScanner hermiteScanner(workResolution);
     hermiteScanner.program = &programHermiteScan;

@@ -8,7 +8,7 @@ precision mediump float;
 subroutine void writeToTexture(int snap, uint deviation);
 subroutine uniform writeToTexture writeToTextureFromView;
 
-layout(r32ui) uniform uimage3D tex[1];
+layout(r32ui) uniform uimage3D tex[2];
 uniform int res;
 
 const uint data[32] = uint[] (1,2,4,8,16,32,64,128,
@@ -22,28 +22,28 @@ layout(index=0) subroutine (writeToTexture) void writeFromXView(int snap, uint d
     int zTexCoord = int(gl_FragCoord.x / 32);
     int offset = int(gl_FragCoord.x) - 32*zTexCoord;
     if (deviation <= eps) {
-        imageAtomicOr(tex[0], ivec3(snap-1,gl_FragCoord.y,zTexCoord), data[offset]);
+        imageAtomicOr(tex[gl_FrontFacing? 0 : 1], ivec3(snap-1,gl_FragCoord.y,zTexCoord), data[offset]);
     } else if (deviation >= 256-eps) {
-        imageAtomicOr(tex[0], ivec3(snap+1,gl_FragCoord.y,zTexCoord), data[offset]);
+        imageAtomicOr(tex[gl_FrontFacing? 0 : 1], ivec3(snap+1,gl_FragCoord.y,zTexCoord), data[offset]);
     }
-    imageAtomicOr(tex[0], ivec3(snap,gl_FragCoord.y,zTexCoord), data[offset]);
+    imageAtomicOr(tex[gl_FrontFacing? 0 : 1], ivec3(snap,gl_FragCoord.y,zTexCoord), data[offset]);
 }
 
 layout(index=1) subroutine (writeToTexture) void writeFromYView(int snap, uint deviation) {
     int zTexCoord = int(gl_FragCoord.y / 32);
     int offset = int(gl_FragCoord.y) - 32*zTexCoord;
     if (deviation <= eps) {
-        imageAtomicOr(tex[0], ivec3(gl_FragCoord.x,snap-1,zTexCoord), data[offset]);
+        imageAtomicOr(tex[gl_FrontFacing? 0 : 1], ivec3(gl_FragCoord.x,snap-1,zTexCoord), data[offset]);
     } else if (deviation >= 256-eps) {
-        imageAtomicOr(tex[0], ivec3(gl_FragCoord.x,snap+1,zTexCoord), data[offset]);
+        imageAtomicOr(tex[gl_FrontFacing? 0 : 1], ivec3(gl_FragCoord.x,snap+1,zTexCoord), data[offset]);
     }
-    imageAtomicOr(tex[0], ivec3(gl_FragCoord.x,snap,zTexCoord), data[offset]);
+    imageAtomicOr(tex[gl_FrontFacing? 0 : 1], ivec3(gl_FragCoord.x,snap,zTexCoord), data[offset]);
 }
 
 void writeToZ(int z) {
     int zTexCoord = z / 32;
     int offset = z - 32*zTexCoord;
-    imageAtomicOr(tex[0], ivec3(res-int(gl_FragCoord.x),gl_FragCoord.y, zTexCoord), data[offset]);
+    imageAtomicOr(tex[gl_FrontFacing? 0 : 1], ivec3(res-int(gl_FragCoord.x),gl_FragCoord.y, zTexCoord), data[offset]);
 
 }
 

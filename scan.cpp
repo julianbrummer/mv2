@@ -79,25 +79,40 @@ void CompressedSignData::setOutside(const Index &index) {
 }
 
 CompressedEdgeData::CompressedEdgeData(uint res) : res(res), size(res+1), depth(res/32 + 1) {
-    cuts.resize(3);
+    frontface_cuts.resize(3);
+    backface_cuts.resize(3);
     for (int i = 0; i < 3; ++i) {
-        cuts[i].resize(size*size*depth);
-        cuts[i].resize(size*size*depth);
+        frontface_cuts[i].resize(size*size*depth);
+        backface_cuts[i].resize(size*size*depth);
     }
 }
 
-bool CompressedEdgeData::cut(uint orientation, uint x, uint y, uint z) const {
+bool CompressedEdgeData::frontface_cut(uint orientation, uint x, uint y, uint z) const {
     if (x > res || y > res || z >= res)
         return false;
     uint zCoord = z/32;
     uint offset = z - 32*zCoord;
-    uint d = cuts[orientation][size*(size*zCoord+y)+x];
+    uint d = frontface_cuts[orientation][size*(size*zCoord+y)+x];
     d = d & pow2(offset);
     return d > 0;
 }
 
-bool CompressedEdgeData::cut(uint orientation, const Index &index) const {
-    return cut(orientation, index.x, index.y, index.z);
+bool CompressedEdgeData::frontface_cut(uint orientation, const Index &index) const {
+    return frontface_cut(orientation, index.x, index.y, index.z);
+}
+
+bool CompressedEdgeData::backface_cut(uint orientation, uint x, uint y, uint z) const {
+    if (x > res || y > res || z >= res)
+        return false;
+    uint zCoord = z/32;
+    uint offset = z - 32*zCoord;
+    uint d = backface_cuts[orientation][size*(size*zCoord+y)+x];
+    d = d & pow2(offset);
+    return d > 0;
+}
+
+bool CompressedEdgeData::backface_cut(uint orientation, const Index &index) const {
+    return backface_cut(orientation, index.x, index.y, index.z);
 }
 
 Scanner::Scanner(uint texRes, uint slices, int texCount)
@@ -182,125 +197,23 @@ Scanner::~Scanner() {
     textures.clear();
 }
 
-void CompressedEdgeScanner::transferData(Direction dir) {
-    glActiveTexture(GL_TEXTURE0);
-    glGetTexImage(GL_TEXTURE_3D, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, &data->cuts[dir][0]);
-}
-
 void Scanner::configureProgram(Direction dir) {
     uint index = dir;
     glUniformSubroutinesuiv(GL_FRAGMENT_SHADER, 1, &index);
 }
 
-/*
-void CompressedHermiteScanner::begin(ScanMode mode, QMatrix4x4& V) {
-
-    switch (mode) {
-        case FRONT_FACES_X: case FRONT_FACES_Y: case FRONT_FACES_Z:
-            assert(this->mode == FRONT_XYZ_BACK_XYZ);
-            glEnable(GL_CULL_FACE);
-            glCullFace(GL_BACK);
-            break;
-        case BACK_FACES_X: case BACK_FACES_Y: case BACK_FACES_Z:
-            assert(this->mode == FRONT_XYZ_BACK_XYZ);
-            glEnable(GL_CULL_FACE);
-            glCullFace(GL_FRONT);
-            break;
-        case FRONT_AND_BACK_FACES_X: case FRONT_AND_BACK_FACES_Y: case FRONT_AND_BACK_FACES_Z:
-            assert(this->mode == FRONT_AND_BACK_XYZ);
-            glDisable(GL_CULL_FACE);
-            break;
-        case NONE:
-            return;
-    }
-    scanMode = mode;
-
-    resetTextures();
-    bindTextures();
-    program->bind();
-    for (uint i = 0; i < textures.size(); ++i) {
-        program->setUniformValue(("tex["+to_string(i)+"]").c_str(), i);
-    }
-
-    program->setUniformValue("tex[0]", 0);
-    program->setUniformValue("tex[1]", 1);
-
-    glDisable(GL_DEPTH_TEST);
-
-    // set viewport to grid resolution
-    glViewport(0,0,size,size);
-
-    V.setToIdentity();
-    switch (mode) {
-        case FRONT_FACES_X: case BACK_FACES_X: case FRONT_AND_BACK_FACES_X:
-            V.rotate(90,0,1,0); break;
-        case FRONT_FACES_Y: case BACK_FACES_Y: case FRONT_AND_BACK_FACES_Y:
-            V.rotate(-90,1,0,0); break;
-        case FRONT_FACES_Z: case BACK_FACES_Z: case FRONT_AND_BACK_FACES_Z:
-            V.rotate(180,0,1,0); break;
-        default:
-            break;
-    }
-
-    program->setUniformValue("res", res);
-}
-*/
-void CompressedHermiteScanner::transferData(Direction dir) {
-
+void CompressedEdgeScanner::transferData(Direction dir) {
     glActiveTexture(GL_TEXTURE0);
     glGetTexImage(GL_TEXTURE_3D, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, &data->frontface_cuts[dir][0]);
     glActiveTexture(GL_TEXTURE1);
     glGetTexImage(GL_TEXTURE_3D, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, &data->backface_cuts[dir][0]);
-    /*
-    ulong i = 0;
-    switch (scanMode) {
-        case FRONT_FACES_X: case FRONT_AND_BACK_FACES_X:
-            for (uint x = 0; x < res; ++x)
-                for (uint y = 0; y < size; ++y)
-                    for (uint z = 0; z < size; ++z)
-                        data->frontface_cuts[0][x][y][z] = texData[i++];
-            break;
-        case FRONT_FACES_Y: case FRONT_AND_BACK_FACES_Y:
-            for (uint y = 0; y < res; ++y)
-                for (uint z = 0; z < size; ++z)
-                    for (uint x = 0; x < size; ++x)
-                        data->frontface_cuts[1][x][y][z] = texData[i++];
-            break;
-        case FRONT_FACES_Z: case FRONT_AND_BACK_FACES_Z:
-            for (uint z = 0; z < res; ++z)
-                for (uint y = 0; y < size; ++y)
-                    for (int x = size-1; x >= 0; --x)
-                        data->frontface_cuts[2][x][y][z] = texData[i++];
-            break;
-        default:
-            break;
-    }
+}
 
-
-    i = 0;
-    switch (scanMode) {
-        case BACK_FACES_X: case FRONT_AND_BACK_FACES_X:
-            for (uint x = 0; x < res; ++x)
-                for (uint y = 0; y < size; ++y)
-                    for (uint z = 0; z < size; ++z)
-                        data->backface_cuts[0][x][y][z] = texData[i++];
-            break;
-        case BACK_FACES_Y: case FRONT_AND_BACK_FACES_Y:
-            for (uint y = 0; y < res; ++y)
-                for (uint z = 0; z < size; ++z)
-                    for (uint x = 0; x < size; ++x)
-                        data->backface_cuts[1][x][y][z] = texData[i++];
-            break;
-        case BACK_FACES_Z: case FRONT_AND_BACK_FACES_Z:
-            for (uint z = 0; z < res; ++z)
-                for (uint y = 0; y < size; ++y)
-                    for (int x = size-1; x >= 0; --x)
-                        data->backface_cuts[2][x][y][z] = texData[i++];
-            break;
-        default:
-            break;
-    } */
-
+void CompressedHermiteScanner::transferData(Direction dir) {
+    glActiveTexture(GL_TEXTURE0);
+    glGetTexImage(GL_TEXTURE_3D, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, &data->frontface_cuts[dir][0]);
+    glActiveTexture(GL_TEXTURE1);
+    glGetTexImage(GL_TEXTURE_3D, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, &data->backface_cuts[dir][0]);
 }
 
 
@@ -309,8 +222,15 @@ CompressedSignSampler::CompressedSignSampler(CompressedEdgeData *data) : SignSam
     edgeData = nullptr;
 }
 
-void CompressedSignSampler::step(uint orientation, const Index& edge, const Index& to, queue<Index> &indices) {
-    if (data->sign(to) && !edgeData->cut(orientation, edge)) {
+void CompressedSignSampler::stepForward(uint orientation, const Index& edge, const Index& to, queue<Index> &indices) {
+    if (data->sign(to) && !edgeData->frontface_cut(orientation, edge)) {
+        data->setOutside(to);
+        indices.push(to);
+    }
+}
+
+void CompressedSignSampler::stepBackward(uint orientation, const Index& edge, const Index& to, queue<Index> &indices) {
+    if (data->sign(to) && !edgeData->backface_cut(orientation, edge)) {
         data->setOutside(to);
         indices.push(to);
     }
@@ -324,16 +244,16 @@ void CompressedSignSampler::floodFill() {
     Index edge(0,0,0);
     while (!indices.empty()) {
         Index& from = indices.front();
-        step(0, from, from.shiftX(1), indices);
-        step(1, from, from.shiftY(1), indices);
-        step(2, from, from.shiftZ(1), indices);
+        stepForward(0, from, from.shiftX(1), indices);
+        stepForward(1, from, from.shiftY(1), indices);
+        stepForward(2, from, from.shiftZ(1), indices);
 
         edge = from.shiftX(-1);
-        step(0, edge, edge, indices);
+        stepBackward(0, edge, edge, indices);
         edge = from.shiftY(-1);
-        step(1, edge, edge, indices);
+        stepBackward(1, edge, edge, indices);
         edge = from.shiftZ(-1);
-        step(2, edge, edge, indices);
+        stepBackward(2, edge, edge, indices);
         indices.pop();
     }
 }

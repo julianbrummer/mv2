@@ -430,7 +430,7 @@ void ConturingWidget::loadModel() {
 */
     aligned_vector3f positions, normals;
     LoadOffFile("D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/models/Greifer.off", positions, normals);
-    model = unique_ptr<Model>(new Model(positions, normals, GL_TRIANGLES, true, 2.0f));
+    model = unique_ptr<Model>(new Model(positions, normals, GL_TRIANGLES, true, 1.9f));
     updateTrafoModel();
     camera.position = camera.rotation._transformVector(Z_AXIS) + camera.center;
     main->statusBar()->showMessage ("Loading model done.",3000);
@@ -443,11 +443,9 @@ void ConturingWidget::updateTrafoModel() {
         if (trafo) {
             model->init(2.0f, *trafo);
             fillTrafoBuffers();
-            scene = unique_ptr<RenderStrategy>(new RenderTrafoModelInstanced(model.get(), trafo.get(), MAX_INSTANCES));
+            //scene = unique_ptr<RenderStrategy>(new RenderTrafoModelInstanced(model.get(), trafo.get(), MAX_INSTANCES));
             //scene = unique_ptr<RenderStrategy>(new RenderTrafoModel(model.get(), trafo.get(), MAX_INSTANCES));
             scene = unique_ptr<RenderStrategy>(new RenderSparseTrafoModel(model.get(), trafo.get(), MAX_INSTANCES));
-
-
         } else {
             scene = unique_ptr<RenderStrategy>(new RenderSingleModel(model.get()));
         }
@@ -690,16 +688,17 @@ void ConturingWidget::keyPressEvent(QKeyEvent* event) {
     case Qt::Key_9: if (selectedCell.y < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftY(1); break;
     }
     cout << selectedCell.x << " " << selectedCell.y <<  " " << selectedCell.z << endl;
-
-    switch (event->key()) {
-    case Qt::Key_Right: trafo_now += 1; if (trafo_now >= (int) trafo->size()) trafo_now = trafo->size()-1; break;
-    case Qt::Key_Left: trafo_now -= 1; if (trafo_now < 0) trafo_now = 0; break;
-    case Qt::Key_Up: trafo_now += 10; if (trafo_now >= (int) trafo->size()) trafo_now = trafo->size()-1; break;
-    case Qt::Key_Down: trafo_now -= 10; if (trafo_now < 0) trafo_now = 0; break;
-    case Qt::Key_PageUp: trafo_now += 1000; if (trafo_now >= (int) trafo->size()) trafo_now = trafo->size()-1; break;
-    case Qt::Key_PageDown: trafo_now -= 1000; if (trafo_now < 0) trafo_now = 0; break;
+    if (trafo) {
+        switch (event->key()) {
+        case Qt::Key_Right: trafo_now += 1; if (trafo_now >= (int) trafo->size()) trafo_now = trafo->size()-1; break;
+        case Qt::Key_Left: trafo_now -= 1; if (trafo_now < 0) trafo_now = 0; break;
+        case Qt::Key_Up: trafo_now += 10; if (trafo_now >= (int) trafo->size()) trafo_now = trafo->size()-1; break;
+        case Qt::Key_Down: trafo_now -= 10; if (trafo_now < 0) trafo_now = 0; break;
+        case Qt::Key_PageUp: trafo_now += 1000; if (trafo_now >= (int) trafo->size()) trafo_now = trafo->size()-1; break;
+        case Qt::Key_PageDown: trafo_now -= 1000; if (trafo_now < 0) trafo_now = 0; break;
+        }
+        std::cout << trafo_now << std::endl;
     }
-    std::cout << trafo_now << std::endl;
 
     updateGL();
 }
@@ -765,15 +764,18 @@ void ConturingWidget::createDMCMesh() {
 }
 
 void ConturingWidget::dmc() {
-    aligned_vector3f positions, colors;
+
     DMC = unique_ptr<DualMarchingCubes>(new DualMarchingCubes());
     DMC->conturing(scene.get(), voxelGridRadius, DEFAULT_RESOLUTION, DEFAULT_WORK_RESOLUTION);
-    //DMC->collapse(0.0f);
-    //DMC->signSampler->inside(voxelGridRadius, positions);
-    //inGridPoints = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
-    //positions.clear();
-    //colors.clear();
+    createDMCMesh();
 /*
+    aligned_vector3f positions, colors;
+    DMC->collapse(0.0f);
+    DMC->signSampler->inside(voxelGridRadius, positions);
+    inGridPoints = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
+    positions.clear();
+    colors.clear();
+
     std::cout << " get vertices " << std::endl;
     DMC->vertices(positions, colors, v_offset, v_count);
     dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
@@ -786,91 +788,13 @@ void ConturingWidget::dmc() {
                 for (uint z = 0; z < levelSize; ++z)
                     v_level_count[i] += v_count[i][x][y][z];
     }
-    */
-    createDMCMesh();
-    //positions.clear();
-    //colors.clear();
-    //DMC->sampler->edgeIntersections(voxelGridRadius, positions, colors);
-    //edgeIntersections = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
-/*
-    main->statusBar()->showMessage("generate vertex model...");
-    std::cout << "generate vertex model..." << std::endl;
+
+
     positions.clear();
     colors.clear();
-    DMC->vertices(positions, colors, v_offset, v_count);
-    dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
-    dmcVertices->setPosition(origin);
-    dmcVertices->scale = 2*cellGridRadius;
-*/
-    //inGridPoints = unique_ptr<Model>(new Model(positions, colors, false, GL_LINES));
-
-
-    /*
-
-    CompressedHermiteScanner* scan = new CompressedHermiteScanner(FRONT_AND_BACK_XYZ, res, voxelGridRadius, programScan);
-    QMatrix4x4 V;
-    Matrix4f modelMat = model->getModelMatrix();
-
-    scan->begin(FRONT_AND_BACK_FACES_X, V);
-    main->statusBar()->showMessage("scan model x-axis...");
-    std::cout << "scan model x-axis..." << std::endl;
-    scanModel(scan->projection, V, modelMat);
-    std::cout << "read x-axis data from graphic memory..." << std::endl;
-    main->statusBar()->showMessage("read x-axis data from graphic memory...");
-    scan->end();
-
-    scan->begin(FRONT_AND_BACK_FACES_Y, V);
-    main->statusBar()->showMessage("scan model y-axis...");
-    std::cout << "scan model y-axis..." << std::endl;
-    scanModel(scan->projection, V, modelMat);
-    std::cout << "read y-axis data from graphic memory..." << std::endl;
-    main->statusBar()->showMessage("read y-axis data from graphic memory...");
-    scan->end();
-
-    scan->begin(FRONT_AND_BACK_FACES_Z, V);
-    main->statusBar()->showMessage("scan model z-axis...");
-    std::cout << "scan model z-axis..." << std::endl;
-    scanModel(scan->projection, V, modelMat);
-    std::cout << "read z-axis data from graphic memory..." << std::endl;
-    main->statusBar()->showMessage("read z-axis data from graphic memory...");
-    scan->end();
-
-    main->statusBar()->showMessage("create sampler...");
-    std::cout << "create sampler..." << std::endl;
-    CompressedHermiteSampler* sampler = new CompressedHermiteSampler(scan->data.get());
-
-    aligned_vector3f positions, colors;
-    vector<uint> indices;
-
-    main->statusBar()->showMessage("generate edge intersection model");
-    std::cout << "generate edge intersection model" << std::endl;
-    sampler->edgeIntersections(voxelGridRadius, positions, colors);
+    DMC->sampler->edgeIntersections(voxelGridRadius, positions, colors);
     edgeIntersections = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
 
-    std::cout << "generate in grid model" << std::endl;
-    main->statusBar()->showMessage("generate in grid model");
-    positions.clear();
-    sampler->inside(voxelGridRadius, positions);
-    inGridPoints = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
-
-    std::cout << "generate out grid model" << std::endl;
-    positions.clear();
-    sampler.outside(voxelGridRadius, positions);
-    outGridPoints = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
-
-
-    DMC = unique_ptr<DualMarchingCubes>(new DualMarchingCubes(sampler));
-    main->statusBar()->showMessage("create octree...");
-    std::cout << "create octree..." << std::endl;
-    DMC->createOctree();
-    main->statusBar()->showMessage("create vertex tree...");
-    std::cout << "create vertex tree..." << std::endl;
-    DMC->createVertexTree();
-
-    main->statusBar()->showMessage(("simplify (t = " + to_string(errorThreshold) + ")...").c_str());
-    std::cout << ("simplify (t = " + to_string(errorThreshold) + ")...").c_str() << std::endl;
-    DMC->collapse(errorThreshold);
-
     main->statusBar()->showMessage("generate vertex model...");
     std::cout << "generate vertex model..." << std::endl;
     positions.clear();
@@ -879,30 +803,6 @@ void ConturingWidget::dmc() {
     dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
     dmcVertices->setPosition(origin);
     dmcVertices->scale = 2*cellGridRadius;
-
-    main->statusBar()->showMessage("generate cell model...");
-    positions.clear();
-    DMC->cells(positions, cell_offset);
-    cells = unique_ptr<Model>(new Model(positions, GL_LINES, false));
-    cells->setPosition(origin);
-    cells->scale = 2*cellGridRadius;
-
-    for (int i = 0; i < levels; ++i) {
-        uint levelSize = pow2(i);
-        for (uint x = 0; x < levelSize; ++x)
-            for (uint y = 0; y < levelSize; ++y)
-                for (uint z = 0; z < levelSize; ++z)
-                    v_level_count[i] += v_count[i][x][y][z];
-    }
-
-    positions.clear();
-    indices.clear();
-    colors.clear();
-
-
-    createDMCMesh();
-
-
 */
     resizeGL(w,h);
 }

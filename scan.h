@@ -22,12 +22,14 @@ struct CompressedHermiteData {
 };
 
 struct CompressedEdgeData {
-    vector_2_uint cuts;
+    vector_2_uint frontface_cuts, backface_cuts;
     uint res, depth, size;
 
     CompressedEdgeData(uint res);
-    inline bool cut(uint orientation, const Index& index) const;
-    inline bool cut(uint orientation, uint x, uint y, uint z) const;
+    inline bool frontface_cut(uint orientation, const Index& index) const;
+    inline bool frontface_cut(uint orientation, uint x, uint y, uint z) const;
+    inline bool backface_cut(uint orientation, const Index& index) const;
+    inline bool backface_cut(uint orientation, uint x, uint y, uint z) const;
 };
 
 struct CompressedSignData {
@@ -90,7 +92,7 @@ class CompressedEdgeScanner : public Scanner {
 public:
     shared_ptr<CompressedEdgeData> data;
     CompressedEdgeScanner(uint res)
-        : Scanner(res+1, res/32 + 1, 1), data(new CompressedEdgeData(res)) {}
+        : Scanner(res+1, res/32 + 1, 2), data(new CompressedEdgeData(res)) {}
     void transferData(Direction dir) override;
 };
 
@@ -107,7 +109,8 @@ class CompressedSignSampler : public SignSampler {
 private:
 
     CompressedEdgeData* edgeData;
-    inline void step(uint orientation, const Index& edge, const Index &to, queue<Index>& indices);
+    inline void stepForward(uint orientation, const Index& edge, const Index &to, queue<Index>& indices);
+    inline void stepBackward(uint orientation, const Index& edge, const Index &to, queue<Index>& indices);
     void floodFill();
 public:
     shared_ptr<CompressedSignData> data;
