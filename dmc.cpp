@@ -103,6 +103,10 @@ DMCOctreeCell* DMCOctreeNode::child(uint i) const {
     return nullptr;
 }
 
+void DMCOctreeNode::setChild(uint i, DMCOctreeCell* child) {
+    children[i] = unique_ptr<DMCOctreeCell>(child);
+}
+
 void DMCOctreeNode::removeChildren() {
     for (int i = 0; i < 8; ++i) {
         children[i] = nullptr;
@@ -919,37 +923,46 @@ void DualMarchingCubes::createVertexNodes(DMCOctreeLeaf* leaf, const Index &leaf
 
 }
 
-bool DualMarchingCubes::createOctreeNodes(DMCOctreeNode* parent, uint parent_size, const Index& parent_index) {
-    uint child_size = parent_size/2;
-    bool homogeneous = true; // true if every child cell has an inside sign config or no edge cut
-    if (parent->level == leaf_level-1) {
-        // create leaves
-        for (int i = 0; i < 8; ++i) {
-            Index child_index = parent_index + child_size*child_origin[i];
-            unique_ptr<DMCOctreeLeaf> child(new DMCOctreeLeaf(parent->level+1));
-            child->signConfig = signSampler->signConfig(child_index);
-            if (!child->homogeneousSigns()) {
-                createVertexNodes(child.get(), child_index);
-                homogeneous = false;
-            }
-            parent->children[i] = move(child);
-        }
-    } else {
+DMCOctreeCell* DualMarchingCubes::createOctreeNodes(uint size, const Index& index, uint8_t level) {
+    uint child_size = size/2;
+    if (level == leaf_level) {
+       uint8_t signConfig = signSampler->signConfig(index);
+       if (signConfig == 0 || signConfig == 255) // homogeneous sign config
+           return nullptr;
+
+       DMCOctreeLeaf* node = new DMCOctreeLeaf(level);
+       node->signConfig = signSampler->signConfig(index);
+       createVertexNodes(node, index);
+       return node;
+    }
+
+    bool homogeneous = true; // true if every child cell has a homogeneous sign config
+    DMCOctreeCell* children[8];
+    for (int i = 0; i < 8; ++i) {
+        children[i] = nullptr;
+        Index child_index = index + child_size*child_origin[i];
+        children[i] = createOctreeNodes(child_size, child_index, level+1);
+        homogeneous &= !children[i];
+    }
+
+    if (!homogeneous) {
+        DMCOctreeCell* node = new DMCOctreeNode(level);
         // create nodes
         for (int i = 0; i < 8; ++i) {
-            Index child_index = parent_index + child_size*child_origin[i];
-            unique_ptr<DMCOctreeNode> child(new DMCOctreeNode(parent->level+1));
-            homogeneous &= createOctreeNodes(child.get(), child_size, child_index);
-
-            parent->children[i] = move(child);
+            if (children[i])
+                node->setChild(i, children[i]);
+            else {
+                Index child_index = index + child_size*child_origin[i];
+                node->setChild(i, new DMCHomogeneousCell(level+1, signSampler->sign(child_index)));
+            }
         }
+        clusterCell(index, node);
+        return node;
     }
-    if (homogeneous)
-        parent->removeChildren();
 
-    clusterCell(parent_index, parent);
+    return nullptr;
 
-    return homogeneous;
+
 }
 
 void DualMarchingCubes::collapse(float max_error) {
@@ -1132,17 +1145,17 @@ void DualMarchingCubes::projectionZ(const Index& node_index, QMatrix4x4& project
     projection.ortho(left, right, bottom, top, -n, -f);
 }
 
-void DualMarchingCubes::conturing(uint currentRes, DMCOctreeNode* node, const Index& node_index) {
+DMCOctreeCell* DualMarchingCubes::conturing(uint currentRes, const Index& node_index, uint8_t level) {
     if (workRes < currentRes) {
+        DMCOctreeCell* node = new DMCOctreeNode(level);
         for (int i = 0; i < 8; ++i) {
             uint newRes = currentRes/2;
             Index child_index = node_index + newRes*child_origin[i];
-            unique_ptr<DMCOctreeNode> child(new DMCOctreeNode(node->level+1));
 
-            conturing(newRes, child.get(), child_index);
-            node->children[i] = move(child);
+            node->setChild(i, conturing(newRes, child_index, level+1));
         }
         clusterCell(node_index, node);
+        return node;
     } else {
 
         std::cout << "scan hermite data (" << currentRes << ")" << std::endl;
@@ -1159,7 +1172,11 @@ void DualMarchingCubes::conturing(uint currentRes, DMCOctreeNode* node, const In
         sampler = unique_ptr<HermiteDataSampler>(new CompressedHermiteSampler(hermiteScanner.data, node_index));
         std::cout << "create octree (" << currentRes << ")" << std::endl;
 
-        createOctreeNodes(node, currentRes, node_index);
+        DMCOctreeCell* node = createOctreeNodes(currentRes, node_index, level);
+        if (!node) {
+            node = new DMCHomogeneousCell(level, signSampler->sign(node_index));
+        }
+        return node;
 
     }
 
@@ -1194,8 +1211,7 @@ bool DualMarchingCubes::conturing(RenderStrategy* scene, float voxelGridRadius, 
     std::cout << "create sign sampler (flood fill)" << std::endl;
     signSampler = unique_ptr<SignSampler>(new CompressedSignSampler(edgeScanner.data.get()));
 
-    root = unique_ptr<DMCOctreeNode>(new DMCOctreeNode(0));
-    conturing(res, root.get(), Index(0));
+    root = unique_ptr<DMCOctreeCell>(conturing(res, Index(0), 0));
     //signSampler.reset();
     //sampler.reset();
 /*

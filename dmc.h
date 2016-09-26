@@ -4597,6 +4597,7 @@ public:
     virtual VertexNode* vertexAssignedTo(uint edgeIndex) const {return nullptr;}
     virtual bool hasChildren() const {return false;}
     virtual DMCOctreeCell* child(uint i) const {return nullptr;} 
+    virtual void setChild(uint i, DMCOctreeCell* child) {}
     virtual bool sign(uint i) const {return false;}
     bool collapsed;
 };
@@ -4609,10 +4610,11 @@ public:
     virtual ~DMCOctreeNode();
     virtual bool hasChildren() const override;
     virtual DMCOctreeCell* child(uint i) const override;
+    virtual void setChild(uint i, DMCOctreeCell* child) override;
     void removeChildren();
 };
 
-class DMCOctreeLeaf : public DMCOctreeCell{
+class DMCOctreeLeaf : public DMCOctreeCell {
 public:
     uint8_t signConfig;
 
@@ -4627,6 +4629,14 @@ public:
     bool in() const;
     bool out() const;
     void flipSign(uint i);
+};
+
+class DMCHomogeneousCell : public DMCOctreeCell {
+    bool s; // the sign of the cell (in/out)
+public:
+    DMCHomogeneousCell(uint8_t level, bool s) : DMCOctreeCell(level), s(s) {}
+    bool sign(uint i) const override {return s;}
+
 };
 
 class DMCOctreeAction {
@@ -4665,7 +4675,7 @@ enum FaceType {
 class DualMarchingCubes : private QOpenGLFunctions_4_3_Core {
 private:
     RenderStrategy* scene;
-    unique_ptr<DMCOctreeNode> root;
+    unique_ptr<DMCOctreeCell> root;
     QGLShaderProgram programEdgeScan, programHermiteScan;
     uint res, workRes, leaf_level;
     float voxelGridRadius, cell_size;
@@ -4717,13 +4727,13 @@ private:
     void initVector(vector_4_uint& v) const;
 
     void createVertexNodes(DMCOctreeLeaf *leaf, const Index& leaf_index);
-    bool createOctreeNodes(DMCOctreeNode* parent, uint parent_size, const Index &parent_index);
+    DMCOctreeCell* createOctreeNodes(uint size, const Index &index, uint8_t level);
 
     bool initShaderProgram(const char *vname, const char *fname, QGLShaderProgram& program);
     void projectionX(const Index& node_index, QMatrix4x4& projection);
     void projectionY(const Index& node_index, QMatrix4x4& projection);
     void projectionZ(const Index& node_index, QMatrix4x4& projection);
-    void conturing(uint currentRes, DMCOctreeNode* node, const Index& node_index);
+    DMCOctreeCell* conturing(uint currentRes, const Index& node_index, uint8_t level);
 public:
     unique_ptr<SignSampler> signSampler;
     unique_ptr<HermiteDataSampler> sampler;
