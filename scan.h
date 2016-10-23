@@ -3,8 +3,10 @@
 #include <QOpenGLFunctions_4_3_Core>
 #include <QGLShaderProgram>
 #include <queue>
+#include <map>
 #include <iostream>
 #include "conturing.h"
+#include "bufferobject.h"
 using namespace std;
 
 
@@ -19,6 +21,14 @@ struct CompressedHermiteData {
     CompressedHermiteData(uint res);
     inline uint frontface_cut(uint orientation, const Index& index) const;
     inline uint backface_cut(uint orientation, const Index& index) const;
+};
+
+
+struct HermiteIntersectionData {
+    map<Intersection, HermiteData> intersections;
+    uint res;
+
+    HermiteIntersectionData(uint res) : res(res) {}
 };
 
 struct CompressedEdgeData {
@@ -45,19 +55,6 @@ struct CompressedSignData {
     void setOutside(uint x, uint y, uint z);
 };
 
-enum ScannerMode {
-    // scans FRONT_FACES_X, FRONT_FACES_Y, FRONT_FACES_Z,
-    // BACK_FACES_X, BACK_FACES_Y, BACK_FACES_Z
-    FRONT_XYZ_BACK_XYZ = 1,
-
-    // scans FRONT_AND_BACK_FACES_X, FRONT_AND_BACK_FACES_Y, FRONT_AND_BACK_FACES_Z
-    FRONT_AND_BACK_XYZ = 2,
-
-};
-
-enum Direction {
-    X,Y,Z
-};
 
 
 class RenderStrategy {
@@ -67,70 +64,104 @@ public:
     virtual ~RenderStrategy() {}
 };
 
+class ScanTarget {
+public:
+    virtual void startScan() {}
+    virtual void endScan() {}
+    virtual void startScan(Direction dir) {}
+    virtual void endScan(Direction dir) {}
+    virtual ~ScanTarget() {}
+};
+
 class Scanner :  protected QOpenGLFunctions_4_3_Core  {
 protected:
-    vector<GLuint> textures;
-    uint slices;
-    uint texRes;
-    virtual void transferData(Direction dir) = 0;
-    virtual void configureProgram(Direction dir);
+    ScanTarget* target;
+    uint res;
+    virtual void transferData() {}
+    virtual void transferData(Direction dir) {}
+    virtual void configureProgram() {}
+    virtual void configureProgram(Direction dir) {}
 private:
     GLuint fbo;
-    void bindTextures();
-    void resetTextures();
-    void unbindImages();
+    void scan(RenderStrategy* scene, Direction dir);
 public:
 
     QGLShaderProgram* program;
     QMatrix4x4 projection;
-    void scan(RenderStrategy* scene, Direction dir);
-    Scanner(uint texRes, uint slices, int texCount);
+    void scan(RenderStrategy* scene);
+    Scanner(ScanTarget* target, uint res);
     virtual ~Scanner();
+};
+
+class TextureTarget :  public ScanTarget, QOpenGLFunctions_4_3_Core  {
+protected:
+    vector<GLuint> textures;
+    uint slices;
+    uint texRes;
+    uint texCount;
+private:
+    void bindTextures();
+    void resetTextures();
+    void unbindImages();
+public:
+    void startScan(Direction dir) override;
+    void endScan(Direction dir) override;
+    TextureTarget(uint texRes, uint slices, int texCount);
+    virtual ~TextureTarget();
+};
+
+class SSBOTarget : public ScanTarget, QOpenGLFunctions_4_3_Core {
+public:
+    unique_ptr<SSBO> buffer;
+    SSBOTarget(set<Intersection>& intersections);
+    void endScan() override;
 };
 
 class CompressedEdgeScanner : public Scanner {
 public:
-    shared_ptr<CompressedEdgeData> data;
+    CompressedEdgeData data;
     CompressedEdgeScanner(uint res)
-        : Scanner(res+1, res/32 + 1, 2), data(new CompressedEdgeData(res)) {}
+        : Scanner(new TextureTarget(res+1, res/32 + 1, 2), res), data(res) {}
     void transferData(Direction dir) override;
+    void configureProgram() override;
+    void configureProgram(Direction dir) override;
 };
 
-class CompressedHermiteScanner :  public Scanner {
-
+class HermiteScanner :  public Scanner {
+private:
+    uint intersectCount;
 public:
-    shared_ptr<CompressedHermiteData> data;
-    CompressedHermiteScanner(uint res)
-        : Scanner(res+1, res+1, 2), data(new CompressedHermiteData(res)) {}
-    void transferData(Direction dir) override;
+    HermiteIntersectionData* data;
+    HermiteScanner(uint res, set<Intersection>& intersections)
+        : Scanner(new SSBOTarget(intersections), res),
+          intersectCount(intersections.size()), data(new HermiteIntersectionData(res)) {}
+    void transferData() override;
+    void configureProgram(Direction dir) override;
 };
 
 class CompressedSignSampler : public SignSampler {
 private:
-
     CompressedEdgeData* edgeData;
-    inline void stepForward(uint orientation, const Index& edge, const Index &to, queue<Index>& indices);
-    inline void stepBackward(uint orientation, const Index& edge, const Index &to, queue<Index>& indices);
+    inline void stepForward(uint dir, const Index& edge, const Index &to, queue<Index>& indices);
+    inline void stepBackward(uint dir, const Index& edge, const Index &to, queue<Index>& indices);
     void floodFill();
 public:
-    shared_ptr<CompressedSignData> data;
-    CompressedSignSampler(CompressedEdgeData* data);
+    CompressedSignData* data;
+    CompressedSignSampler(CompressedEdgeData& data);
 
     bool sign(uint x, uint y, uint z) const override;
+    virtual ~CompressedSignSampler();
 };
 
-class CompressedHermiteSampler : public HermiteDataSampler {
-private:
-    Index origin;
+class SparseHermiteSampler : public HermiteDataSampler {
+
 public:
-    shared_ptr<CompressedHermiteData> data;
+    HermiteIntersectionData* data;
 
-    CompressedHermiteSampler(shared_ptr<CompressedHermiteData> data, const Index& origin = Index(0)) : data(data), origin(origin), HermiteDataSampler(data->res) {}
-    bool frontEdgeInfo(uint orientation, const Index& from, float& d, Vector3f& n) const override;
-    bool backEdgeInfo(uint orientation, const Index& from, float& d, Vector3f& n) const override;
-    bool hasFrontCut(uint orientation, const Index &from) const override;
-    bool hasBackCut(uint orientation, const Index &from) const override;
-
+    SparseHermiteSampler(HermiteIntersectionData* data) :  HermiteDataSampler(data->res), data(data) {}
+    HermiteData* edgeInfo(Direction dir, Orientation orientation, const Index& edge) const override;
+    bool hasCut(Direction dir, Orientation orientation, const Index& edge) const override;
+    virtual ~SparseHermiteSampler();
 };
 
 #endif // SCAN_H

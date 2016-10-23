@@ -4,6 +4,7 @@
 #include <vector>
 #include <Eigen/Core>
 #include <array>
+#include <set>
 #include <memory>
 #include <iostream>
 #include "def.h"
@@ -11,12 +12,18 @@
 using namespace std;
 using namespace Eigen;
 
-
-
 typedef unsigned int uint;
 
+enum Direction {
+    X,Y,Z
+};
+
+enum Orientation {
+    BACK = - 1, FRONT = 1
+};
+
 struct Index {
-    unsigned int x, y, z;
+    uint x, y, z;
     Index(uint x, uint y, uint z) : x(x), y(y), z(z) {}
     Index(uint xyz) : x(xyz), y(xyz), z(xyz) {}
     Index() : Index(0) {}
@@ -25,12 +32,78 @@ struct Index {
     Index operator /(uint d) const;
     friend Index operator *(const Index& index, uint s);
     friend Index operator *(uint s, const Index& index);
+    friend std::ostream& operator <<(std::ostream& os, const Index &obj);
     inline bool operator <(uint xyz) const;
     inline bool operator >(uint xyz) const;
+    bool operator == (const Index& rhs) const;
+    bool operator != (const Index& rhs) const;
     uint& operator [](uint orientation);
     Index shiftX(int shift) const;
     Index shiftY(int shift) const;
     Index shiftZ(int shift) const;
+
+};
+
+inline bool operator <(const Index& lhs, const Index& rhs)
+{
+    if (lhs.z < rhs.z)
+        return true;
+    if (lhs.z > rhs.z)
+        return false;
+    if (lhs.y < rhs.y)
+        return true;
+    if (lhs.y > rhs.y)
+        return false;
+    if (lhs.x < rhs.x)
+        return true;
+    if (lhs.x > rhs.x)
+        return false;
+    return false;
+}
+
+struct Intersection {
+    Index edge;
+    int status; // -3, -2, -1, 1, 2, 3 (-z, -y, -x, x, y, z)
+    Intersection() : edge(0), status(1) {}
+    Intersection(const Index& edge, Direction dir, Orientation orientation)
+        : edge(edge) {
+        setDir(dir);
+        setOrientation(orientation);
+    }
+
+    friend std::ostream& operator <<(std::ostream& os, const Intersection& obj);
+    bool operator == (const Intersection& rhs) const;
+    bool operator != (const Intersection& rhs) const;
+    Direction dir();
+    Orientation orientation();
+    void setDir(Direction dir);
+    void setOrientation(Orientation orientation);
+};
+
+
+inline bool operator <(const Intersection& lhs, const Intersection& rhs)
+{
+    if (lhs.status < rhs.status)
+        return true;
+    if (lhs.status > rhs.status)
+        return false;
+    return lhs.edge < rhs.edge;
+}
+
+struct HermiteData {
+    Vector3f n;
+    float d;
+    HermiteData() : n(0,0,0), d(0.0f) {}
+    HermiteData(Vector3f& n, float d) : n(n), d(d) {}
+};
+
+struct HermiteEdgeData {
+    Vector3f n;
+    Vector3f p;
+    uint e;
+    Orientation orientation;
+    HermiteEdgeData() : n(0,0,0), p(0,0,0), e(0), orientation(FRONT) {}
+    HermiteEdgeData(Vector3f& n, Vector3f p, uint e, Orientation orientation) : n(n), p(p), e(e), orientation(orientation) {}
 };
 
 // shift of child origin from parent origin
@@ -43,6 +116,12 @@ const Index child_origin[8] = {
 const Index corner_delta[8] = {
     Index(0,0,0), Index(1,0,0), Index(1,0,1), Index(0,0,1),
     Index(0,1,0), Index(1,1,0), Index(1,1,1), Index(0,1,1)
+};
+
+const Index cells_contain_edge_delta[3][4] = {
+    {Index(-1,0,0), Index(-1,-1,0), Index(0,-1,0), Index(0,0,0)},
+    {Index(-1,0,0), Index(-1,0,-1), Index(0,0,-1), Index(0,0,0)},
+    {Index(0,0,0), Index(0,-1,0), Index(-1,-1,0), Index(-1,0,0)}
 };
 
 
@@ -65,10 +144,9 @@ const uint corner_edges[8][3] = {
     {6,11,7}
 };
 
-
-// edge orientations of a cell (0=x, 1=y, 2=z)
-const uint edge_orientation[12] = {
-    0,2,0,2,0,2,0,2,1,1,1,1
+// edge directions of a cell (x, y, z)
+const Direction edge_dir[12] = {
+    X,Z,X,Z,X,Z,X,Z,Y,Y,Y,Y
 };
 
 // power_of_2
@@ -155,14 +233,20 @@ public:
 
 class SignSampler : public GridSampler {
 public:
+    set<Intersection> contributingIntersections;
+    set<Index> contributingCells;
+
     SignSampler(uint res) : GridSampler(res) {}
 
     virtual bool sign(uint x, uint y, uint z) const = 0;
+    bool contributes(const Intersection& i) const;
+    bool contributes(const Index& node_origin) const;
     bool sign(const Index& index) const;
     uint8_t signConfig(const Index& node_origin) const;
 
     void inside(float voxelGridRadius, aligned_vector3f &positions);
     void outside(float voxelGridRadius, aligned_vector3f &positions);
+    virtual ~SignSampler() {}
 };
 
 class HermiteDataSampler : public GridSampler  {
@@ -170,13 +254,12 @@ class HermiteDataSampler : public GridSampler  {
 public:
     HermiteDataSampler(uint res) : GridSampler(res) {}
 
-    virtual bool frontEdgeInfo(uint orientation, const Index& from, float& d, Vector3f& n) const = 0;
-    virtual bool backEdgeInfo(uint orientation, const Index& from, float& d, Vector3f& n) const = 0;
-    virtual bool hasFrontCut(uint orientation, const Index &from) const = 0;
-    virtual bool hasBackCut(uint orientation, const Index &from) const = 0;
+    virtual HermiteData* edgeInfo(Direction dir, Orientation orientation, const Index& edge) const = 0;
+    virtual bool hasCut(Direction dir, Orientation orientation, const Index& edge) const = 0;
 
+    bool edgeInfo(Direction dir, Orientation orientation, const Index& edge, float& d, Vector3f& n) const;
     bool hasCut(const Index &cellOrigin) const;
-    bool hasCut(uint orientation, const Index &from) const;
+    bool hasCut(Direction dir, const Index &edge) const;
     void edgeIntersections(float voxelGridRadius, aligned_vector3f &positions, aligned_vector3f &colors);
 
     virtual ~HermiteDataSampler() = default;

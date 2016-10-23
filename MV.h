@@ -96,6 +96,13 @@ public slots:
     void storeModel();
     void loadModel();
     void loadTrack();
+    void removeTrack() {
+        trafo = nullptr;
+        if (model) {
+            model->init(1.9f);
+        }
+    }
+
     void sliderValueChanged(int value);
 
     void toggleViewModel() {showModel = !showModel; updateGL();}
@@ -103,12 +110,10 @@ public slots:
     void toggleViewInGridPoints() {showInGridPoints = !showInGridPoints; updateGL();}
     void toggleViewOutGridPoints() {showOutGridPoints = !showOutGridPoints; updateGL();}
     void toggleViewDMCVertices() {showDMCVertices = !showDMCVertices; updateGL();}
-    void toggleViewDMCModel() {showDMCModel = !showDMCModel; updateGL();}
+    void toggleViewOutModel() {showOutModel = !showOutModel; updateGL();}
     void toggleWireframe() {wireframe = !wireframe; updateGL();}
     void toggleViewCells() {
         showCells = !showCells;
-        if(!cells)
-            createCellMesh();
         updateGL();
     }
     void increaseSelectedLevel() {
@@ -136,9 +141,34 @@ public slots:
         }
         updateGL();
     }
+    void toggleThinShelled() {
+        thinShelled = !thinShelled;
+        DMC.componentStrategy = unique_ptr<SurfaceComponentStrategy>(new ThinShelledStrategy(DEFAULT_TRUNCATION));
+    }
+    void toggleSparseTrajectory() {
+        sparseTrajectory = !sparseTrajectory;
+    }
+    void trackForwardSlow() {
+        shiftTrack(1);
+    }
+    void trackForwardNormal() {
+        shiftTrack(50);
+    }
+    void trackForwardFast() {
+        shiftTrack(1000);
+    }
+    void trackBackwardSlow() {
+        shiftTrack(-1);
+    }
+    void trackBackwardNormal() {
+        shiftTrack(-50);
+    }
+    void trackBackwardFast() {
+        shiftTrack(-1000);
+    }
 
     void updateDMCMesh();
-    void dmc();
+    void compute();
 
 
 public:
@@ -149,9 +179,8 @@ public:
     static const float CAMERA_SCROLL_FACTOR;
     static const float MIN_ERROR_THRESHOLD;
     static const float MAX_ERROR_THRESHOLD;
-    static const int DEFAULT_RESOLUTION = 1024;
-    static const int DEFAULT_WORK_RESOLUTION = 512;
-    static const int MAX_RESOLUTION = 512;
+    static const float DEFAULT_TRUNCATION;
+    static const int MIN_OCTREE_DEPTH = 5;
     static const int MAX_INSTANCES = 1000;
 
 
@@ -172,11 +201,12 @@ public:
 
     //bool wireframe;
     bool showModel, showEdgeIntesections, showInGridPoints, showOutGridPoints,
-         showDMCModel, showDMCVertices, showCells, wireframe;
+         showOutModel, showDMCVertices, showCells, wireframe, thinShelled, sparseTrajectory;
 
+    GLint max_res;
     uint res;
     float errorThreshold;
-    int levels;
+    int levels, max_depth;
 
     qreal timestep;
     unique_ptr<Trafo> trafo;
@@ -198,13 +228,15 @@ protected:
     int oldX,oldY,button;
 
 private:
-    void updateTrafoModel();
+    void shiftTrack(int shift);
+    void updateRenderStrategy();
     void fillTrafoBuffers();
 
     void bindModel(const Matrix4f &VM, QVector4D color);
     void renderModel(Model* model, const Matrix4f &VM, QVector4D color);
     void bindDebugMesh(Model* model, const Matrix4f &V, bool useVertexColor = false, QVector4D color = QVector4D(1,1,1,1));
     void renderDebugMesh(Model* model, const Matrix4f &V, bool useVertexColor = false, QVector4D color = QVector4D(1,1,1,1));
+
     void createDMCMesh();
     void createCellMesh();
 
@@ -224,7 +256,8 @@ private:
     vector<uint> v_level_count, cell_level_count;
     float voxelGridRadius, cellGridRadius;
 
-    unique_ptr<DualMarchingCubes> DMC;
+    DualMarchingCubes DMC;
+
     // keep to write to file
     aligned_vector3f positions;
     vector<uint> indices;

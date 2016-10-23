@@ -145,6 +145,7 @@ void Model::centerAndScale(float size) {
 }
 
 void Model::init(float size, const Trafo& T) {
+    init(size);
     aligned_vector3f positions;
     positions.resize(T.size()*8);
     array<Vector4f, 8> v {

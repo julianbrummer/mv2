@@ -35,9 +35,10 @@ CGMainWindow::CGMainWindow (QWidget* parent)
     // Create a menu
     QMenu *file = new QMenu("&File",this);
     file->addAction ("Load model", ogl, SLOT(loadModel()), Qt::CTRL+Qt::Key_L);
-    //file->addAction ("Load track", ogl, SLOT(loadTrack()), Qt::CTRL+Qt::Key_T);
+    file->addAction ("Load track", ogl, SLOT(loadTrack()), Qt::CTRL+Qt::Key_T);
+    file->addAction ("Remove track", ogl, SLOT(removeTrack()), Qt::CTRL+Qt::Key_R);
     file->addAction ("Save model", ogl, SLOT(storeModel()), Qt::CTRL+Qt::Key_S);
-    file->addAction ("DMC", ogl, SLOT(dmc()), Qt::CTRL+Qt::Key_D);
+
     file->addAction ("Quit", qApp, SLOT(quit()), Qt::CTRL+Qt::Key_Q);
 
     menuBar()->addMenu(file);               
@@ -47,7 +48,7 @@ CGMainWindow::CGMainWindow (QWidget* parent)
     view->addAction ("Edge Intersections", ogl, SLOT(toggleViewEdgeIntersections()), Qt::Key_E)->setCheckable(true);
     view->addAction ("Inner Grid", ogl, SLOT(toggleViewInGridPoints()), Qt::Key_I)->setCheckable(true);
     view->addAction ("Vertices", ogl, SLOT(toggleViewDMCVertices()), Qt::Key_V)->setCheckable(true);
-    view->addAction ("DMC Mesh", ogl, SLOT(toggleViewDMCModel()), Qt::Key_D)->setCheckable(true);
+    view->addAction ("Swept Volume", ogl, SLOT(toggleViewOutModel()), Qt::Key_S)->setCheckable(true);
     view->addAction ("Wireframe", ogl, SLOT(toggleWireframe()), Qt::Key_W)->setCheckable(true);
     view->addAction ("Cells", ogl, SLOT(toggleViewCells()), Qt::Key_C)->setCheckable(true);
     view->addAction ("Higher Level", ogl, SLOT(decreaseSelectedLevel()), Qt::Key_Plus);
@@ -56,6 +57,22 @@ CGMainWindow::CGMainWindow (QWidget* parent)
 
     menuBar()->addMenu(view);
 
+
+    QMenu *track = new QMenu("&Track",this);
+    track->addAction (">", ogl, SLOT(trackForwardSlow()), Qt::Key_Right);
+    track->addAction (">>", ogl, SLOT(trackForwardNormal()), Qt::Key_Up);
+    track->addAction (">>>", ogl, SLOT(trackForwardFast()), Qt::Key_PageUp);
+    track->addAction ("<", ogl, SLOT(trackBackwardSlow()), Qt::Key_Left);
+    track->addAction ("<<", ogl, SLOT(trackBackwardNormal()), Qt::Key_Down);
+    track->addAction ("<<<", ogl, SLOT(trackBackwardFast()), Qt::Key_PageDown);
+
+    menuBar()->addMenu(track);
+
+    QMenu *sv = new QMenu("&SweptVolume",this);
+    sv->addAction ("Sparse Trajectory", ogl, SLOT(toggleSparseTrajectory()), Qt::CTRL+Qt::ALT+Qt::Key_S)->setCheckable(true);
+    sv->addAction ("Thin Shelled", ogl, SLOT(toggleThinShelled()), Qt::CTRL+Qt::ALT+Qt::Key_T)->setCheckable(true);
+    sv->addAction ("Compute", ogl, SLOT(compute()), Qt::CTRL+Qt::Key_D);
+    menuBar()->addMenu(sv);
 
     QSlider *threshold_slider = new QSlider(Qt::Horizontal);
     threshold_slider->setMinimum(0);
@@ -123,77 +140,6 @@ void getFromStlFile(std::vector<QVector3D>& triangles, const char *filename) {
     instream.close();
 }
 
-void getFromVdaFile( std::vector<QMatrix4x4>& trafo, const char* filename, qreal& timestep ) {
-    std::setlocale(LC_NUMERIC,"C");
-
-    std::ifstream vdafile( filename );
-    if (!vdafile) {
-        std::cerr << "getFromVdaFile: Cannot open vda-file" << std::endl;
-        return;
-    }
-
-    trafo.clear();
-
-    std::string s,t;
-    size_t pos1,pos2,pos3;
-
-    getline(vdafile,s);
-    getline(vdafile,s);
-    getline(vdafile,s);
-
-    if (s.find("DT")) {
-            pos1 = s.find(".");
-            pos1 = s.find(".",pos1+1);
-            t = s.substr(pos1,pos1+5);
-            timestep = atof(t.data());
-    }
-
-    getline(vdafile,s);
-
-    QMatrix4x4 M;
-    M.setToIdentity();
-
-    int n = 0;
-    while (!vdafile.eof()) {
-            getline(vdafile,s);
-
-            if (s.find("TMAT") == std::string::npos) {
-                    // std::cout << "end of file" << std::endl;
-                    break;
-            }
-
-            for(int i=0;i<3;i++) {
-                    getline(vdafile,s);
-                    pos1 = s.find(",");
-                    t = s.substr(0,pos1);
-                    M(i,0) = atof(t.data());
-                    pos2 = s.find(",",pos1+1);
-                    t = s.substr(pos1+1,pos2-pos1-1);
-                    M(i,1) = atof(t.data());
-                    pos3 = s.find(",",pos2+1);
-                    t = s.substr(pos2+1,pos3-pos2-1);
-                    M(i,2) = atof(t.data());
-            }
-
-            getline(vdafile,s);
-            pos1 = s.find(",");
-            t = s.substr(0,pos1);
-            M(0,3) = atof(t.data());
-            pos2 = s.find(",",pos1+1);
-            t = s.substr(pos1+1,pos2-pos1-1);
-            M(1,3) = atof(t.data());
-            pos3 = s.find(" ",pos2+1);
-            t = s.substr(pos2+1,pos3-pos2-1);
-            M(2,3) = atof(t.data());
-
-            trafo.push_back(M);
-            n++;
-    }
-
-    vdafile.close();
-
-    std::cout << "Loaded " << filename << " with " << trafo.size() << " transformations" << std::endl;
-}
 
 void writeToStlFile(std::vector<QVector3D>& T, const char *filename) {
 	char buffer[80];
@@ -385,76 +331,90 @@ const float ConturingWidget::CAMERA_MOVEMENT_SPEED = 0.0025f;
 const float ConturingWidget::CAMERA_SCROLL_FACTOR = 1.2f;
 const float ConturingWidget::MIN_ERROR_THRESHOLD = 0.0f;
 const float ConturingWidget::MAX_ERROR_THRESHOLD = 0.0001f;
+const float ConturingWidget::DEFAULT_TRUNCATION = 0.05f;
 
 ConturingWidget::ConturingWidget (CGMainWindow *mainwindow,QWidget* parent ) : QGLWidget (parent) {
     main = mainwindow;
     errorThreshold = MIN_ERROR_THRESHOLD;
-    res = DEFAULT_RESOLUTION;
 }
 
 void ConturingWidget::storeModel() {
-    if (dmcModel) {
-        writeToOffFile(positions, indices, "D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/out/motor.off");
-        main->statusBar()->showMessage ("Saving model done.",3000);
+    if (!dmcModel) {
+        main->statusBar()->showMessage ("No output model!",3000);
+        return;
     }
+    QString filename = QFileDialog::getSaveFileName(this, "Save output model ...", QString(), "(*.off)" );
+    writeToOffFile(positions, indices, filename.toLatin1());
+
+    main->statusBar()->showMessage ("Saving model done.",3000);
 }
 
 void ConturingWidget::loadTrack() {
-// QString filename = QFileDialog::getOpenFileName(this, "Load track ...", QString(), "(*.vda)" );
+    QString filename = QFileDialog::getOpenFileName(this, "Load track ...", QString(), "(*.vda)" );
 
-// if (filename.isEmpty()) return;
-// statusBar()->showMessage ("Loading track ...");
+    if (filename.isEmpty()) return;
+        main->statusBar()->showMessage ("Loading track ...");
 
-// if (filename.endsWith(".vda")) {
-//     std::ifstream trackfile(filename.toLatin1());
-// }
+    double d = QInputDialog::getDouble(this, "How do you want to scale the track?", "Scale Factor", 1.0);
     trafo = unique_ptr<Trafo>(new Trafo());
-    trafo->scale = 1.0f;
-    LoadVdaFile(trafo->M,"D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/tracks/Einfahrt.vda",trafo->scale, timestep);
-    updateTrafoModel();
+    trafo->scale = d;
+    LoadVdaFile(trafo->M,filename.toStdString().c_str(),trafo->scale, timestep);
+
+    if (model) {
+        model->init(1.9f, *trafo);
+        fillTrafoBuffers();
+    }
+    main->statusBar()->showMessage ("Loading track done.",3000);
 }
 
 void ConturingWidget::loadModel() {
-/*
+
     QString filename = QFileDialog::getOpenFileName(this, "Load model ...", QString(), "(*.stl *.off)" );
 
     if (filename.isEmpty()) return;
-    statusBar()->showMessage ("Loading model ...");
+        main->statusBar()->showMessage ("Loading model ...");
 
     aligned_vector3f positions, normals;
-    //if (filename.endsWith(".stl"))
-    //    getFromStlFile(ogl->triangles,filename.toLatin1());
+    if (filename.endsWith(".stl"))
+        LoadStlFile(filename.toLatin1(), positions, normals);
 
     if (filename.endsWith(".off"))
         LoadOffFile(filename.toLatin1(), positions, normals);
-*/
-    aligned_vector3f positions, normals;
-    LoadOffFile("D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/models/Greifer.off", positions, normals);
+
+    //LoadOffFile("D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/models/motor.off", positions, normals);
     model = unique_ptr<Model>(new Model(positions, normals, GL_TRIANGLES, true, 1.9f));
-    updateTrafoModel();
+    if (trafo) {
+        model->init(1.9f, *trafo);
+        fillTrafoBuffers();
+    }
     camera.position = camera.rotation._transformVector(Z_AXIS) + camera.center;
+
     main->statusBar()->showMessage ("Loading model done.",3000);
-    showModel = true;
-    updateGL();
 }
 
-void ConturingWidget::updateTrafoModel() {
+void ConturingWidget::shiftTrack(int shift) {
+    if (trafo) {
+        trafo_now += shift;
+        trafo_now = max(min(trafo_now, (int) trafo->size()-1), 0);
+
+        updateGL();
+    }
+}
+
+void ConturingWidget::updateRenderStrategy() {
     if (model) {
         if (trafo) {
-            model->init(2.0f, *trafo);
-            fillTrafoBuffers();
-            //scene = unique_ptr<RenderStrategy>(new RenderTrafoModelInstanced(model.get(), trafo.get(), MAX_INSTANCES));
-            //scene = unique_ptr<RenderStrategy>(new RenderTrafoModel(model.get(), trafo.get(), MAX_INSTANCES));
-            scene = unique_ptr<RenderStrategy>(new RenderSparseTrafoModel(model.get(), trafo.get(), MAX_INSTANCES));
-        } else {
+            if (sparseTrajectory)
+                scene = unique_ptr<RenderStrategy>(new RenderSparseTrafoModel(model.get(), trafo.get(), MAX_INSTANCES));
+            else
+                scene = unique_ptr<RenderStrategy>(new RenderTrafoModelInstanced(model.get(), trafo.get(), MAX_INSTANCES));
+        } else
             scene = unique_ptr<RenderStrategy>(new RenderSingleModel(model.get()));
-        }
     }
-
 }
 
 void ConturingWidget::fillTrafoBuffers() {
-    std::cout << "  fill SSBO with matrices" << std::endl;
+    std::cout << "  fill SSBO with trafo matrices" << std::endl;
     trafo_buffer = unique_ptr<SSBO>(new SSBO(1, trafo->size()*64, GL_STATIC_DRAW));
     trafo_buffer->bind();
     float values[16];
@@ -486,38 +446,32 @@ void ConturingWidget::initializeGL() {
     initShaderProgram(program, ":/shaders/vshader.glsl", ":/shaders/fshader.glsl");
     initShaderProgram(programDebug, ":/shaders/vpoints.glsl", ":/shaders/fpoints.glsl");
 
-    qglClearColor(Qt::black);
-    glPointSize(4.0);
-    glEnable(GL_DEPTH_TEST);
-
-    //GLint max_size = 0;
-    //glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &max_size);
-    //std::cout << "GL_MAX_3D_TEXTURE_SIZE " << max_size << std::endl;
 
     camera.position = Z_AXIS;
     rotX = rotY = 0;
     zoom = 1.0f;
 
-    levels = i_log2(res)+1;
     voxelGridRadius = 1.0f;
-    cellGridRadius = voxelGridRadius-voxelGridRadius/(res+1);
-    origin = Vector3f(-cellGridRadius,-cellGridRadius,-cellGridRadius);
-    v_level_count = vector<uint>(levels, 0);
-    cell_level_count = vector<uint>(levels, 0);
 
     trafo_now = 0;
-    loadTrack();
-    loadModel();
 
     showModel = false;
-    showDMCModel = false;
+    showOutModel = false;
     showEdgeIntesections = false;
     showInGridPoints = false;
     showOutGridPoints = false;
     showDMCVertices = false;
     showCells = false;
     wireframe = false;
+    thinShelled = false;
+    sparseTrajectory = false;
     selectedLevel = 0;
+
+    qglClearColor(Qt::black);
+    glPointSize(4.0);
+    glEnable(GL_DEPTH_TEST);
+    glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &max_res);
+    max_depth = i_log2(max_res);
 }
 
 
@@ -559,7 +513,7 @@ void ConturingWidget::paintGL() {
             VM *= (*trafo)[trafo_now];
         renderModel(model.get(), VM, QVector4D(0.75,0.75,0.75,1.0));
     }
-    if (dmcModel && showDMCModel) {
+    if (dmcModel && showOutModel) {
         if (wireframe)
             glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
         Matrix4f VM = V * dmcModel->getModelMatrix();
@@ -688,17 +642,6 @@ void ConturingWidget::keyPressEvent(QKeyEvent* event) {
     case Qt::Key_9: if (selectedCell.y < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftY(1); break;
     }
     cout << selectedCell.x << " " << selectedCell.y <<  " " << selectedCell.z << endl;
-    if (trafo) {
-        switch (event->key()) {
-        case Qt::Key_Right: trafo_now += 1; if (trafo_now >= (int) trafo->size()) trafo_now = trafo->size()-1; break;
-        case Qt::Key_Left: trafo_now -= 1; if (trafo_now < 0) trafo_now = 0; break;
-        case Qt::Key_Up: trafo_now += 10; if (trafo_now >= (int) trafo->size()) trafo_now = trafo->size()-1; break;
-        case Qt::Key_Down: trafo_now -= 10; if (trafo_now < 0) trafo_now = 0; break;
-        case Qt::Key_PageUp: trafo_now += 1000; if (trafo_now >= (int) trafo->size()) trafo_now = trafo->size()-1; break;
-        case Qt::Key_PageDown: trafo_now -= 1000; if (trafo_now < 0) trafo_now = 0; break;
-        }
-        std::cout << trafo_now << std::endl;
-    }
 
     updateGL();
 }
@@ -728,49 +671,69 @@ void ConturingWidget::createCellMesh() {
 }
 
 void ConturingWidget::updateDMCMesh() {
-    if (DMC) {
-        main->statusBar()->showMessage(("simplify (t = " + to_string(errorThreshold) + ")...").c_str());
-        DMC->collapse(errorThreshold);
-/*
-        main->statusBar()->showMessage("generate vertex model...");
-        aligned_vector3f positions, colors;
-        v_offset.clear();
-        v_count.clear();
-        DMC->vertices(positions, colors, v_offset, v_count);
-        dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
-        dmcVertices->setPosition(origin);
-        dmcVertices->scale = 2*cellGridRadius;
-*/
-        createDMCMesh();
-        updateGL();
+    if (!dmcModel) {
+        main->statusBar()->showMessage("No model to simplify!");
+        cout << "No model to simplify!" << endl;
     }
+    main->statusBar()->showMessage(("simplify (t = " + to_string(errorThreshold) + ")...").c_str());
+    cout << ("simplify (t = " + to_string(errorThreshold) + ")...") << endl;
+    DMC.collapse(errorThreshold);
+/*
+    main->statusBar()->showMessage("generate vertex model...");
+    aligned_vector3f positions, colors;
+    v_offset.clear();
+    v_count.clear();
+    DMC->vertices(positions, colors, v_offset, v_count);
+    dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
+    dmcVertices->setPosition(origin);
+    dmcVertices->scale = 2*cellGridRadius;
+*/
+    createDMCMesh();
+    updateGL();
+
 }
 
 void ConturingWidget::createDMCMesh() {
     positions.clear();
     indices.clear();
     main->statusBar()->showMessage("create DMC Mesh...");
-    std::cout << "create DMC Mesh..." << std::endl;
-    DMC->createMesh(positions, indices);
+    cout << "create DMC Mesh..." << endl;
+    DMC.createMesh(positions, indices);
     dmcModel = unique_ptr<Model>(new Model(positions, indices, false));
     dmcModel->setPosition(origin);
     dmcModel->scale = 2*cellGridRadius;
     main->statusBar()->showMessage(("Done. "
                                    + to_string(positions.size()) + " Vertices, "
                                    + to_string(indices.size()/3) + " Triangles").c_str());
-    std::cout << ("Done. "
+    cout << ("Done. "
                   + to_string(positions.size()) + " Vertices, "
-                  + to_string(indices.size()/3) + " Triangles").c_str() << std::endl;
+                  + to_string(indices.size()/3) + " Triangles").c_str() << endl;
 }
 
-void ConturingWidget::dmc() {
+void ConturingWidget::compute() {
+    if (!model) {
+        main->statusBar()->showMessage("No input model!");
+        cout << "No input model!" << endl;
+        return;
+    }
+    updateRenderStrategy();
+    int depth = QInputDialog::getInt(this, "Resolution", "Input the depth of the octree", MIN_OCTREE_DEPTH, MIN_OCTREE_DEPTH, max_depth);
+    res = pow2(depth);
+    levels = depth+1;
 
-    DMC = unique_ptr<DualMarchingCubes>(new DualMarchingCubes());
-    DMC->conturing(scene.get(), voxelGridRadius, DEFAULT_RESOLUTION, DEFAULT_WORK_RESOLUTION);
+    cellGridRadius = voxelGridRadius-voxelGridRadius/(res+1);
+    origin = Vector3f(-cellGridRadius,-cellGridRadius,-cellGridRadius);
+    v_level_count = vector<uint>(levels, 0);
+    cell_level_count = vector<uint>(levels, 0);
+    createCellMesh();
+
+
+    DMC.conturing(scene.get(), voxelGridRadius, res);
     createDMCMesh();
+    DMC.collapse(0.0f);
 /*
     aligned_vector3f positions, colors;
-    DMC->collapse(0.0f);
+
     DMC->signSampler->inside(voxelGridRadius, positions);
     inGridPoints = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
     positions.clear();
@@ -806,7 +769,6 @@ void ConturingWidget::dmc() {
 */
     resizeGL(w,h);
 }
-
 
 int main (int argc, char **argv) {
     QApplication app(argc, argv);

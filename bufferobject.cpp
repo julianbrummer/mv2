@@ -21,6 +21,11 @@ SSBO& SSBO::bufferSubData(GLintptr offset, GLsizeiptr size, const GLvoid* data) 
     return *this;
 }
 
+SSBO& SSBO::getBufferSubData(GLintptr offset, GLsizeiptr size, GLvoid* data) {
+    glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, offset, size, data);
+    return *this;
+}
+
 void SSBO::bind() {
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, id);
 }

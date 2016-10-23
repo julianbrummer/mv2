@@ -110,6 +110,43 @@ void LoadOffFile(const char* as_FileName, aligned_vector3f& vertices,
     }
 }
 
+void LoadStlFile(const char* filename, aligned_vector3f& vertices,
+                 aligned_vector3f& normals) {
+    std::ifstream instream(filename,std::ios::binary);
+    if (!instream) {
+        std::cerr << "file does not exist!" << std::endl;
+        return;
+    }
+
+    instream.seekg( 80, std::ios_base::beg ); // skip ascii header
+    int trinum = 0;
+    instream.read((char*) &trinum, 4 ); // number of triangles
+    float tmp;
+    for(int k = 0; k < trinum; k++) {
+        for(int i=0;i < 3 ; i++ )
+            instream.read( (char*) &tmp, 4 );
+        for(int i = 0; i < 3; i++ ) {
+            qreal v[3];
+            for(int j = 0 ; j < 3 ; j++) {
+                instream.read( (char*) &tmp, 4 );
+                v[j] = tmp;
+            }
+            vertices.push_back(Vector3f(v[0],v[1],v[2]));
+        }
+        Vector3f v0 = vertices[vertices.size()-3];
+        Vector3f v1 = vertices[vertices.size()-2];
+        Vector3f v2 = vertices[vertices.size()-1];
+        Vector3f n = (v1 - v0).cross(v2 - v0);
+        n.normalize();
+        normals.push_back(n);
+        normals.push_back(n);
+        normals.push_back(n);
+        instream.read( (char*) &tmp, 2);
+    }
+
+    instream.close();
+}
+
 void LoadVdaFile(vector<Matrix4f>& trafo, const char* filename, float scale, qreal& timestep) {
     std::setlocale(LC_NUMERIC,"C");
 

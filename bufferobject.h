@@ -18,6 +18,7 @@ public:
 
     SSBO& bufferData(GLsizeiptr size, const GLvoid* data, GLenum usage);
     SSBO& bufferSubData(GLintptr offset, GLsizeiptr size, const GLvoid* data);
+    SSBO& getBufferSubData(GLintptr offset, GLsizeiptr size, GLvoid* data);
     void bind();
     void unBind();
     ~SSBO();

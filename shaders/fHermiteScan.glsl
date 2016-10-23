@@ -5,82 +5,96 @@ precision mediump int;
 precision mediump float;
 #endif
 
-subroutine void writeToTexture(int snap, uint deviation, uvec3 n);
-subroutine uniform writeToTexture writeToTextureFromView;
+subroutine ivec4 vecFromView(int x, int y, int z);
+subroutine uniform vecFromView getVecFromView;
 
-layout(r32ui) uniform uimage3D tex[2];
+struct Intersection {
+    ivec4 e;
+    vec3 n;
+    float d;
+};
+
+layout(std140, binding = 3) buffer data {
+    Intersection cut[];
+};
+
 uniform int res;
 flat in vec3 n;
+const float eps = 0.015; // works well for 1024
+//const float eps = 0.00;
 
-//uint eps = max(res/256,1);
-const uint eps = 4; // works well for 1024
-//const uint eps = 1;
-
-void writeToTex(ivec3 coord, uvec3 normal, uint d) {
-    d = d << 24; // distance from grid point [0..1) -> [1..255] 1. byte
-    d += (normal.x << 16); // 2. byte
-    d += (normal.y << 8); // 3. byte
-    d += normal.z; // 4. byte
-    if(gl_FrontFacing) {
-        //imageAtomicCompSwap(tex[0], coord, 0, d);
-        if (imageAtomicCompSwap(tex[0], coord, 0, d) != 0) //just write if current = 0
-            imageAtomicMin(tex[0], coord, d); // current != 0
-    } else {
-        imageAtomicMax(tex[1], coord, d);
+bool greater(ivec4 a, ivec4 b) {
+    for (int i = 3; i >= 0; i--) {
+        if (a[i] > b[i])
+                return true;
+        if (a[i] < b[i])
+                return false;
     }
+    return false;
 }
 
-layout(index=0) subroutine (writeToTexture) void writeFromXView(int snap, uint deviation, uvec3 n) {
-    //  255 = 1      255 = 1
-    //-----|------------|------
+int contributes(ivec4 e){
+	
+    int left = 0;
+    int right = cut.length()-1;
+    int m = 0;
 
-    if (deviation <= eps) {
-        writeToTex(ivec3(snap-1,gl_FragCoord.y,gl_FragCoord.x), n, 255);
-    } else if (deviation >= 256-eps) {
-        writeToTex(ivec3(snap+1,gl_FragCoord.y,gl_FragCoord.x), n, 1);
+    while (left <= right) {
+        m = (right + left) / 2;
+        if (all(equal(e, cut[m].e))) {
+                return m;
+        }
+        if (greater(e, cut[m].e)){
+                left = m + 1;
+        } else {
+                right = m - 1;
+        }
     }
-    writeToTex(ivec3(snap,gl_FragCoord.y,gl_FragCoord.x), n, deviation);
+
+    return -1;
+}
+/*
+int contributes(ivec4 e) {
+    for(int i = 0; i < cut.length(); i++) {
+        if (all(equal(e, cut[i].e))) {
+                return i;
+        }
+    }
+    return -1;
+}
+*/
+layout(index=0) subroutine (vecFromView) ivec4 vecFromXView(int x, int y, int z) {
+        return ivec4(z,y,x, gl_FrontFacing? 1 : -1);
 }
 
-layout(index=1) subroutine (writeToTexture) void writeFromYView(int snap, uint deviation, uvec3 n) {
-    //  255 = 1      255 = 1
-    //-----|------------|------
-    if (deviation <= eps) {
-        writeToTex(ivec3(gl_FragCoord.x,snap-1,gl_FragCoord.y), n, 255);
-    } else if (deviation >= 256-eps) {
-        writeToTex(ivec3(gl_FragCoord.x,snap+1,gl_FragCoord.y), n, 1);
-    }
-    writeToTex(ivec3(gl_FragCoord.x,snap,gl_FragCoord.y), n, deviation);
+layout(index=1) subroutine (vecFromView) ivec4 vecFromYView(int x, int y, int z) {
+        return ivec4(x,z,y,gl_FrontFacing? 2 : -2);
 }
 
-layout(index=2) subroutine (writeToTexture) void writeFromZView(int snap, uint deviation, uvec3 n) {
-    //  255 = 1      255 = 1
-    //-----|------------|------
-    if (deviation <= eps) {
-        writeToTex(ivec3(res-int(gl_FragCoord.x),gl_FragCoord.y, snap-1), n, 255);
-    } else if (deviation >= 256-eps) {
-        writeToTex(ivec3(res-int(gl_FragCoord.x),gl_FragCoord.y, snap+1), n, 1);
-    }
-    writeToTex(ivec3(res-int(gl_FragCoord.x),gl_FragCoord.y, snap), n, deviation);
+layout(index=2) subroutine (vecFromView) ivec4 vecFromZView(int x, int y, int z) {
+        return ivec4(res-x,y,z,gl_FrontFacing? 3 : -3);
 }
 
-
+void tryWrite(ivec4 edge, float deviation) {
+    int index = contributes(edge);
+    if (index >= 0) {
+        if (cut[index].d < 0.0 || (gl_FrontFacing && cut[index].d > deviation) || (!gl_FrontFacing && cut[index].d < deviation)) {
+            cut[index].d = deviation;
+            cut[index].n = normalize(n);
+        }
+    }
+}
 
 void main() {
     // snap -> +----|--+
-    //float depth = gl_FragCoord.z*res;
-    float depth = gl_FragCoord.z*(res+1)-0.5;
-    int snap = int(floor(depth));
-    // 0        1
-    // |--------|
-    // 1       255
-    uint d = uint((depth-snap)*254+1.5); //+0.5 to round
-    
-
-    uvec3 normal = uvec3((normalize(n)+vec3(1))*0.5*255+0.5); // [-1..1]^3 -> [0..255]^3
-    writeToTextureFromView(snap, d, normal);
-
-    //imageAtomicExchange(tex[1], ivec3(1,1,1), 100);
-
+    float d = gl_FragCoord.z*res;
+    int snap = int(floor(d));
+    float deviation = d - snap;
+    if (deviation <= eps) {
+        tryWrite(getVecFromView(int(gl_FragCoord.x), int(gl_FragCoord.y), snap-1), 1.0);
+    } else if (deviation >= 1-eps) {
+        tryWrite(getVecFromView(int(gl_FragCoord.x), int(gl_FragCoord.y), snap+1), 0.0);
+    }
+    tryWrite(getVecFromView(int(gl_FragCoord.x), int(gl_FragCoord.y), snap), deviation);
 }
 

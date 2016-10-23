@@ -2,6 +2,7 @@
 #include <iostream>
 #include <queue>
 #include <stack>
+#include <algorithm>
 
 QEF::QEF() {
     for (int i = 0; i < 6; ++i) {
@@ -115,14 +116,20 @@ void DMCOctreeNode::removeChildren() {
 
 DMCOctreeLeaf::DMCOctreeLeaf(uint8_t level) : DMCOctreeCell(level), signConfig(0) {
     for (uint i = 0; i < 12; ++i) {
-        edgeVertices[i] = -1;
+        frontEdgeVertices[i] = -1;
+        backEdgeVertices[i] = -1;
     }
     collapsed = true;
 }
 
-VertexNode* DMCOctreeLeaf::vertexAssignedTo(uint edgeIndex) const {
+VertexNode* DMCOctreeLeaf::vertexAssignedTo(uint edgeIndex, Orientation type) const {
     int8_t vIndex = -1;
-    vIndex = edgeVertices[edgeIndex];
+    switch (type) {
+        case FRONT:
+            vIndex = frontEdgeVertices[edgeIndex]; break;
+        case BACK:
+            vIndex = backEdgeVertices[edgeIndex]; break;
+    }
     return vIndex < 0? nullptr : vertices[vIndex].get();
 }
 
@@ -180,12 +187,14 @@ void DualMarchingCubes::assignSurface(const vector<shared_ptr<VertexNode>>& vert
     }
 }
 
-void DualMarchingCubes::clusterIndices(array<DMCOctreeCell* , 4> nodes, uint orientation, uint& maxSurfaceIndex,
+void DualMarchingCubes::clusterIndices(array<DMCOctreeCell* , 4> nodes, Direction dir, Orientation orientation, uint& maxSurfaceIndex,
                                     const vector<shared_ptr<VertexNode>>& vertices) {
     array<VertexNode*, 4> v{nullptr, nullptr, nullptr, nullptr};
     for (uint i = 0; i < 4; ++i) {
-        uint e = edge_of_four_cells[orientation][i];
-        v[i] = nodes[i]->vertexAssignedTo(e);
+        uint e = edge_of_four_cells[dir][i];
+        v[i] = nodes[i]->vertexAssignedTo(e, orientation);
+        if (!v[i]) // this may happen since the method is also called for O----O edges
+            return;
         // folow parent pointers up the vertex tree
         while (!v[i]->parent.expired())
             v[i] = v[i]->parent.lock().get();
@@ -212,12 +221,15 @@ void DualMarchingCubes::clusterIndices(array<DMCOctreeCell* , 4> nodes, uint ori
     }
 }
 
-void DualMarchingCubes::clusterBoundaryIndices(array<DMCOctreeCell* , 2> nodes, uint orientation, uint face_orientation, uint plane, uint& maxSurfaceIndex,
-                                    const vector<shared_ptr<VertexNode>>& vertices) {
+void DualMarchingCubes::clusterBoundaryIndices(array<DMCOctreeCell* , 2> nodes, Direction dir, Orientation orientation,
+                                               uint face_orientation, uint plane, uint& maxSurfaceIndex,
+                                               const vector<shared_ptr<VertexNode>>& vertices) {
     array<VertexNode*, 2> v{nullptr, nullptr};
     for (uint i = 0; i < 2; ++i) {
-        uint e = edge_of_two_cells[face_orientation][plane][orientation][i];
-        v[i] = nodes[i]->vertexAssignedTo(e);
+        uint e = edge_of_two_cells[face_orientation][plane][dir][i];
+        v[i] = nodes[i]->vertexAssignedTo(e, orientation);
+        if (!v[i]) // this may happen since the method is also called for O----O edges
+            return;
         // folow parent pointers up the vertex tree
         while (!v[i]->parent.expired())
             v[i] = v[i]->parent.lock().get();
@@ -244,65 +256,75 @@ void DualMarchingCubes::clusterBoundaryIndices(array<DMCOctreeCell* , 2> nodes, 
     }
 }
 
-void DualMarchingCubes::clusterEdge(array<DMCOctreeCell* , 4> nodes, uint orientation,
+void DualMarchingCubes::clusterEdge(array<DMCOctreeCell* , 4> nodes, Direction dir,
                                     uint& maxSurfaceIndex, const vector<shared_ptr<VertexNode>>& vertices) {
 
     if (nodes[0]->hasChildren() && nodes[1]->hasChildren() && nodes[2]->hasChildren() && nodes[3]->hasChildren()) {
         for (uint i = 0; i < 2; ++i) { // subdivided edge
             clusterEdge(array<DMCOctreeCell*, 4>{
-                            nodes[0]->child(edge_edge_mask[orientation][i][0]),
-                            nodes[1]->child(edge_edge_mask[orientation][i][1]),
-                            nodes[2]->child(edge_edge_mask[orientation][i][2]),
-                            nodes[3]->child(edge_edge_mask[orientation][i][3])},
-                        orientation, maxSurfaceIndex, vertices);
+                            nodes[0]->child(edge_edge_mask[dir][i][0]),
+                            nodes[1]->child(edge_edge_mask[dir][i][1]),
+                            nodes[2]->child(edge_edge_mask[dir][i][2]),
+                            nodes[3]->child(edge_edge_mask[dir][i][3])},
+                        dir, maxSurfaceIndex, vertices);
         }
 
     } else if (!nodes[0]->hasChildren() && !nodes[1]->hasChildren() && !nodes[2]->hasChildren() && !nodes[3]->hasChildren()) {
 
-        uint e = edge_of_four_cells[orientation][0];
+        uint e = edge_of_four_cells[dir][0];
         bool s0 = nodes[0]->sign(edge_corners[e][0]);
         bool s1 = nodes[0]->sign(edge_corners[e][1]);
-        if (!s0 && s1 || s0 && !s1)
-            clusterIndices(nodes, orientation, maxSurfaceIndex, vertices);
-
+        if (!s0 && s1)
+            clusterIndices(nodes, dir, FRONT, maxSurfaceIndex, vertices);
+        else if (s0 && !s1)
+            clusterIndices(nodes, dir, BACK, maxSurfaceIndex, vertices);
+        else if (!s0 && !s1) {
+            clusterIndices(nodes, dir, FRONT, maxSurfaceIndex, vertices);
+            clusterIndices(nodes, dir, BACK, maxSurfaceIndex, vertices);
+        }
     }
 
 }
 
-void DualMarchingCubes::clusterBoundaryEdge(array<DMCOctreeCell* , 2> nodes,  uint orientation, uint face_orientation, uint plane,
+void DualMarchingCubes::clusterBoundaryEdge(array<DMCOctreeCell* , 2> nodes, Direction dir, uint face_orientation, uint plane,
                                     uint& maxSurfaceIndex, const vector<shared_ptr<VertexNode>>& vertices) {
 
     if (nodes[0]->hasChildren() && nodes[1]->hasChildren()) {
         for (uint i = 0; i < 2; ++i) { // subdivided edge
             clusterBoundaryEdge(array<DMCOctreeCell*, 2>{
-                            nodes[0]->child(boundary_edge_edge_mask[face_orientation][plane][orientation][i][0]),
-                            nodes[1]->child(boundary_edge_edge_mask[face_orientation][plane][orientation][i][1])},
-                            orientation, face_orientation, plane, maxSurfaceIndex, vertices);
+                            nodes[0]->child(boundary_edge_edge_mask[face_orientation][plane][dir][i][0]),
+                            nodes[1]->child(boundary_edge_edge_mask[face_orientation][plane][dir][i][1])},
+                            dir, face_orientation, plane, maxSurfaceIndex, vertices);
         }
 
     } else if (!nodes[0]->hasChildren() && !nodes[1]->hasChildren()) {
 
-        uint e = edge_of_two_cells[face_orientation][plane][orientation][0];
+        uint e = edge_of_two_cells[face_orientation][plane][dir][0];
         bool s0 = nodes[0]->sign(edge_corners[e][0]);
         bool s1 = nodes[0]->sign(edge_corners[e][1]);
-        if (!s0 && s1 || s0 && !s1)
-            clusterBoundaryIndices(nodes, orientation, face_orientation, plane, maxSurfaceIndex, vertices);
-
+        if (!s0 && s1)
+            clusterBoundaryIndices(nodes, dir, FRONT, face_orientation, plane, maxSurfaceIndex, vertices);
+        else if (s0 && !s1)
+            clusterBoundaryIndices(nodes, dir, BACK, face_orientation, plane, maxSurfaceIndex, vertices);
+        else if (!s0 && !s1) {
+            clusterBoundaryIndices(nodes, dir, FRONT, face_orientation, plane, maxSurfaceIndex, vertices);
+            clusterBoundaryIndices(nodes, dir, BACK, face_orientation, plane, maxSurfaceIndex, vertices);
+        }
     }
 
 }
 
-void DualMarchingCubes::clusterFace(array<DMCOctreeCell*, 2> nodes, uint orientation,
+void DualMarchingCubes::clusterFace(array<DMCOctreeCell*, 2> nodes, Direction dir,
                                     uint& maxSurfaceIndex, const vector<shared_ptr<VertexNode>>& vertices) {
 
     for (int i = 0; i < 4; ++i) { // 4 faces tiling coarse face
         // 2 child cells define 1 face
-        if (nodes[0]->child(face_face_mask[orientation][i][0])->hasChildren()
-                    && nodes[1]->child(face_face_mask[orientation][i][1])->hasChildren()) {
+        if (nodes[0]->child(face_face_mask[dir][i][0])->hasChildren()
+                    && nodes[1]->child(face_face_mask[dir][i][1])->hasChildren()) {
                 clusterFace(array<DMCOctreeCell*, 2>{
-                                nodes[0]->child(face_face_mask[orientation][i][0]),
-                                nodes[1]->child(face_face_mask[orientation][i][1])},
-                            orientation, maxSurfaceIndex, vertices);
+                                nodes[0]->child(face_face_mask[dir][i][0]),
+                                nodes[1]->child(face_face_mask[dir][i][1])},
+                            dir, maxSurfaceIndex, vertices);
         }
     }
 
@@ -310,31 +332,31 @@ void DualMarchingCubes::clusterFace(array<DMCOctreeCell*, 2> nodes, uint orienta
     for (uint i = 0; i < 4; ++i) { // 4 edges in coarse face
         // 4 child cells define 1 edge
         clusterEdge(array<DMCOctreeCell*, 4>{
-                        nodes[face_edge_mask[orientation][i][0][0]]->child(face_edge_mask[orientation][i][0][1]),
-                        nodes[face_edge_mask[orientation][i][1][0]]->child(face_edge_mask[orientation][i][1][1]),
-                        nodes[face_edge_mask[orientation][i][2][0]]->child(face_edge_mask[orientation][i][2][1]),
-                        nodes[face_edge_mask[orientation][i][3][0]]->child(face_edge_mask[orientation][i][3][1])},
-                    face_edge_orientation[orientation][i], maxSurfaceIndex, vertices);
+                        nodes[face_edge_mask[dir][i][0][0]]->child(face_edge_mask[dir][i][0][1]),
+                        nodes[face_edge_mask[dir][i][1][0]]->child(face_edge_mask[dir][i][1][1]),
+                        nodes[face_edge_mask[dir][i][2][0]]->child(face_edge_mask[dir][i][2][1]),
+                        nodes[face_edge_mask[dir][i][3][0]]->child(face_edge_mask[dir][i][3][1])},
+                    face_edge_dir[dir][i], maxSurfaceIndex, vertices);
     }
 }
 
-void DualMarchingCubes::clusterBoundaryFace(DMCOctreeCell* node, uint orientation, uint plane,
+void DualMarchingCubes::clusterBoundaryFace(DMCOctreeCell* node, Direction dir, uint plane,
                                             uint& maxSurfaceIndex, const vector<shared_ptr<VertexNode>>& vertices) {
 
     for (int i = 0; i < 4; ++i) { // 4 faces tiling coarse face
         // cell_edge_mask is equal to boundary_face_face_mask
-        if (node->child(cell_edge_mask[orientation][plane][i])->hasChildren()) {
-                clusterBoundaryFace(node->child(cell_edge_mask[orientation][plane][i]),
-                                    orientation, plane, maxSurfaceIndex, vertices);
+        if (node->child(cell_edge_mask[dir][plane][i])->hasChildren()) {
+                clusterBoundaryFace(node->child(cell_edge_mask[dir][plane][i]),
+                                    dir, plane, maxSurfaceIndex, vertices);
         }
     }
 
     for (uint i = 0; i < 4; ++i) { // 4 edges in coarse face
         // 2 child cells define 1 boundary edge
         clusterBoundaryEdge(array<DMCOctreeCell*, 2>{
-                        node->child(boundary_face_edge_mask[orientation][plane][i][0]),
-                        node->child(boundary_face_edge_mask[orientation][plane][i][1])},
-                        face_edge_orientation[orientation][i], orientation, plane, maxSurfaceIndex, vertices);
+                        node->child(boundary_face_edge_mask[dir][plane][i][0]),
+                        node->child(boundary_face_edge_mask[dir][plane][i][1])},
+                        face_edge_dir[dir][i], dir, plane, maxSurfaceIndex, vertices);
     }
 
 
@@ -368,7 +390,7 @@ void DualMarchingCubes::clusterCell(const Index& cell_index, DMCOctreeCell* node
                     clusterFace(array<DMCOctreeCell*, 2>{
                                     node->child(cell_face_mask[i][j][0]),
                                     node->child(cell_face_mask[i][j][1])},
-                                i, maxSurfaceIndex, vertices);
+                                Direction(i), maxSurfaceIndex, vertices);
                 }
             }
         }
@@ -376,7 +398,7 @@ void DualMarchingCubes::clusterCell(const Index& cell_index, DMCOctreeCell* node
         // cluster boundary faces
         for (uint i = 0; i < 3; ++i) { // x,y,z
             for (uint j = 0; j < 2; ++j) { //plane: left, right, bottom, top, back, front boundary face
-                clusterBoundaryFace(node, i, j, maxSurfaceIndex, vertices);
+                clusterBoundaryFace(node, Direction(i), j, maxSurfaceIndex, vertices);
             }
         }
 
@@ -388,7 +410,7 @@ void DualMarchingCubes::clusterCell(const Index& cell_index, DMCOctreeCell* node
                                 node->child(cell_edge_mask[i][j][1]),
                                 node->child(cell_edge_mask[i][j][2]),
                                 node->child(cell_edge_mask[i][j][3])},
-                            i, maxSurfaceIndex, vertices);
+                            Direction(i), maxSurfaceIndex, vertices);
             }
         }
 
@@ -429,7 +451,7 @@ void DualMarchingCubes::clusterCell(const Index& cell_index, DMCOctreeCell* node
             VertexNode* vNode = node->vertices[i].get();
             // average masspoint from QEFs of connected vertices with highest dimension
             vNode->qef->m /= (float) mCount[i];
-            generateVertex(cell_index, node->level, *(vNode->qef), vNode->v);
+            componentStrategy->vertexStrategy->generateVertex(cell_index, node->level, res, *(vNode->qef), vNode->v);
             vNode->computeError();
         }
 
@@ -487,14 +509,14 @@ bool DualMarchingCubes::checkNormal(const vector<VertexNode*> v, initializer_lis
     return n1.transpose() * dir >= 0 && n2.transpose() * dir >= 0;
 }
 
-void DualMarchingCubes::triangulate(const vector<VertexNode*> v, bool front_face, const uint orientation, aligned_vector3f& positions, vector<uint>& indices) {
-    Vector3f dir(0,0,0);
-    dir[orientation] = front_face? 1 : -1;
+void DualMarchingCubes::triangulate(const vector<VertexNode*> v, bool front_face, const Direction dir, aligned_vector3f& positions, vector<uint>& indices) {
+    Vector3f vDir(0,0,0);
+    vDir[dir] = front_face? 1 : -1;
     float d0_2 = (v[0]->v - v[2]->v).squaredNorm();
     float d1_3 = (v[1]->v - v[3]->v).squaredNorm();
     if (front_face) {
-        if ((d0_2 < d1_3 && checkNormal(v, {1,0,2,0, 2,0,3,0}, dir)) ||
-            (d0_2 >= d1_3 && !checkNormal(v, {1,0,3,0, 2,1,3,1}, dir))) {
+        if ((d0_2 < d1_3 && checkNormal(v, {1,0,2,0, 2,0,3,0}, vDir)) ||
+            (d0_2 >= d1_3 && !checkNormal(v, {1,0,3,0, 2,1,3,1}, vDir))) {
             triangle(v, {0,1,2}, positions, indices);
             triangle(v, {0,2,3}, positions, indices);
         } else {
@@ -502,8 +524,8 @@ void DualMarchingCubes::triangulate(const vector<VertexNode*> v, bool front_face
             triangle(v, {1,2,3}, positions, indices);
         }
     } else {
-        if ((d0_2 < d1_3 && checkNormal(v, {2,0,1,0, 3,0,2,0}, dir)) ||
-            (d0_2 >= d1_3 && !checkNormal(v, {3,0,1,0, 3,1,2,1}, dir))) {
+        if ((d0_2 < d1_3 && checkNormal(v, {2,0,1,0, 3,0,2,0}, vDir)) ||
+            (d0_2 >= d1_3 && !checkNormal(v, {3,0,1,0, 3,1,2,1}, vDir))) {
             triangle(v, {0,2,1}, positions, indices);
             triangle(v, {0,3,2}, positions, indices);
         } else {
@@ -513,31 +535,32 @@ void DualMarchingCubes::triangulate(const vector<VertexNode*> v, bool front_face
     }
 }
 
-void DualMarchingCubes::edgeProc(array<DMCOctreeCell* , 4> nodes, uint orientation, FaceType type,
+void DualMarchingCubes::edgeProc(array<DMCOctreeCell* , 4> nodes, Direction dir, Orientation orientation,
                                  aligned_vector3f& positions, vector<uint>& indices) {
 
     array<VertexNode*, 4> vNodes{nullptr, nullptr, nullptr, nullptr};
     for (uint i = 0; i < 4; ++i) {
-
         // get vertices assigned to this edge
-        vNodes[i] = nodes[i]->vertexAssignedTo(edge_of_four_cells[orientation][i]);
+        vNodes[i] = nodes[i]->vertexAssignedTo(edge_of_four_cells[dir][i], orientation);
+        if (!vNodes[i]) // this may happen since the method is also called for O----O edges
+            return;
         // folow parent pointers up the vertex tree to the last vertex marked as collapsable
         while (!vNodes[i]->parent.expired() && vNodes[i]->parent.lock()->collapsable)
             vNodes[i] = vNodes[i]->parent.lock().get();
     }
     vector<VertexNode*> v = makeUnique(vNodes); // remove doubles (e.g vNodes have same ancestor)
 
-    switch (type) {
-        case FRONT_FACE:
+    switch (orientation) {
+        case FRONT:
         if (v.size() == 4) { // quad
-            triangulate(v, true, orientation, positions, indices);
+            triangulate(v, true, dir, positions, indices);
         } else if (v.size() == 3) { // triangle
             triangle(v, {0,1,2}, positions, indices);
         }
         break;
-        case BACK_FACE:
+        case BACK:
         if (v.size() == 4) { // quad
-            triangulate(v, false, orientation, positions, indices);
+            triangulate(v, false, dir, positions, indices);
         } else if (v.size() == 3) { // triangle
             triangle(v, {0,2,1}, positions, indices);
         }
@@ -545,43 +568,48 @@ void DualMarchingCubes::edgeProc(array<DMCOctreeCell* , 4> nodes, uint orientati
     }
 }
 
-void DualMarchingCubes::edgeProc(array<DMCOctreeCell* , 4> nodes, uint orientation, aligned_vector3f& positions, vector<uint>& indices) {
+void DualMarchingCubes::edgeProc(array<DMCOctreeCell* , 4> nodes, Direction dir, aligned_vector3f& positions, vector<uint>& indices) {
 
     if (nodes[0]->hasChildren() && nodes[1]->hasChildren() && nodes[2]->hasChildren() && nodes[3]->hasChildren()) {
         for (uint i = 0; i < 2; ++i) { // subdivided edge
             edgeProc(array<DMCOctreeCell*, 4>{
-                            nodes[0]->child(edge_edge_mask[orientation][i][0]),
-                            nodes[1]->child(edge_edge_mask[orientation][i][1]),
-                            nodes[2]->child(edge_edge_mask[orientation][i][2]),
-                            nodes[3]->child(edge_edge_mask[orientation][i][3])},
-                        orientation, positions, indices);
+                            nodes[0]->child(edge_edge_mask[dir][i][0]),
+                            nodes[1]->child(edge_edge_mask[dir][i][1]),
+                            nodes[2]->child(edge_edge_mask[dir][i][2]),
+                            nodes[3]->child(edge_edge_mask[dir][i][3])},
+                        dir, positions, indices);
         }
 
     } else if (!nodes[0]->hasChildren() && !nodes[1]->hasChildren() && !nodes[2]->hasChildren() && !nodes[3]->hasChildren()) {
 
-        uint e = edge_of_four_cells[orientation][0];
+        uint e = edge_of_four_cells[dir][0];
         bool s0 = nodes[0]->sign(edge_corners[e][0]);
         bool s1 = nodes[0]->sign(edge_corners[e][1]);
+
         if (!s0 && s1)
-            edgeProc(nodes, orientation, FRONT_FACE, positions, indices);
+            edgeProc(nodes, dir, FRONT, positions, indices);
         else if (s0 && !s1)
-            edgeProc(nodes, orientation, BACK_FACE, positions, indices);
+            edgeProc(nodes, dir, BACK, positions, indices);
+        else if (!s0 && !s1) {
+            edgeProc(nodes, dir, FRONT, positions, indices);
+            edgeProc(nodes, dir, BACK, positions, indices);
+        }
     }
 
 }
 
-void DualMarchingCubes::faceProc(array<DMCOctreeCell*, 2> nodes, uint orientation, aligned_vector3f& positions, vector<uint>& indices) {
+void DualMarchingCubes::faceProc(array<DMCOctreeCell*, 2> nodes, Direction dir, aligned_vector3f& positions, vector<uint>& indices) {
     if (nodes[0]->collapsed && nodes[1]->collapsed)
         return;
 
     for (uint i = 0; i < 4; ++i) { // 4 faces tiling coarse face
         // 2 child cells define 1 face
-        if (nodes[0]->child(face_face_mask[orientation][i][0])->hasChildren()
-                    && nodes[1]->child(face_face_mask[orientation][i][1])->hasChildren()) {
+        if (nodes[0]->child(face_face_mask[dir][i][0])->hasChildren()
+                    && nodes[1]->child(face_face_mask[dir][i][1])->hasChildren()) {
                 faceProc(array<DMCOctreeCell*, 2>{
-                                nodes[0]->child(face_face_mask[orientation][i][0]),
-                                nodes[1]->child(face_face_mask[orientation][i][1])},
-                            orientation, positions, indices);
+                                nodes[0]->child(face_face_mask[dir][i][0]),
+                                nodes[1]->child(face_face_mask[dir][i][1])},
+                            dir, positions, indices);
         }
     }
 
@@ -589,11 +617,11 @@ void DualMarchingCubes::faceProc(array<DMCOctreeCell*, 2> nodes, uint orientatio
     for (uint i = 0; i < 4; ++i) { // 4 edges in coarse face
         // 4 child cells define 1 edge
         edgeProc(array<DMCOctreeCell*, 4>{
-                        nodes[face_edge_mask[orientation][i][0][0]]->child(face_edge_mask[orientation][i][0][1]),
-                        nodes[face_edge_mask[orientation][i][1][0]]->child(face_edge_mask[orientation][i][1][1]),
-                        nodes[face_edge_mask[orientation][i][2][0]]->child(face_edge_mask[orientation][i][2][1]),
-                        nodes[face_edge_mask[orientation][i][3][0]]->child(face_edge_mask[orientation][i][3][1])},
-                    face_edge_orientation[orientation][i], positions, indices);
+                        nodes[face_edge_mask[dir][i][0][0]]->child(face_edge_mask[dir][i][0][1]),
+                        nodes[face_edge_mask[dir][i][1][0]]->child(face_edge_mask[dir][i][1][1]),
+                        nodes[face_edge_mask[dir][i][2][0]]->child(face_edge_mask[dir][i][2][1]),
+                        nodes[face_edge_mask[dir][i][3][0]]->child(face_edge_mask[dir][i][3][1])},
+                    face_edge_dir[dir][i], positions, indices);
     }
 }
 
@@ -611,7 +639,7 @@ void DualMarchingCubes::cellProc(const DMCOctreeCell *node, aligned_vector3f& po
                     faceProc(array<DMCOctreeCell*, 2>{
                                     node->child(cell_face_mask[i][j][0]),
                                     node->child(cell_face_mask[i][j][1])},
-                                i, positions, indices);
+                                Direction(i), positions, indices);
                 }
             }
         }
@@ -623,19 +651,19 @@ void DualMarchingCubes::cellProc(const DMCOctreeCell *node, aligned_vector3f& po
                                 node->child(cell_edge_mask[i][j][1]),
                                 node->child(cell_edge_mask[i][j][2]),
                                 node->child(cell_edge_mask[i][j][3])},
-                            i, positions, indices);
+                            Direction(i), positions, indices);
             }
         }
     }
 
 }
 
-bool DualMarchingCubes::inCell(Vector3d& pos, const Vector3d& cellOrigin, double size, double eps) const {
+bool MapToQEFMinimum::inCell(Vector3d& pos, const Vector3d& cellOrigin, double size, double eps) const {
     return pos[0] <= size+cellOrigin[0]+eps && pos[1] <= size+cellOrigin[1]+eps && pos[2] <= size+cellOrigin[2]+eps &&
            pos[0] >= cellOrigin[0]-eps && pos[1] >= cellOrigin[1]-eps && pos[2] >= cellOrigin[2]-eps;
 }
 
-void DualMarchingCubes::generateVertex(const Index& cell_index, uint8_t level, QEF& qef, Vector3f& v) {
+void MapToQEFMinimum::generateVertex(const Index& cell_index, uint8_t level, uint res, QEF& qef, Vector3f& v) {
     Vector3d vQEF(0,0,0);
     qef.solve(truncation, vQEF); // relative to masscenter
     vQEF += qef.m.cast<double>();  // relative to cellGrid origin
@@ -650,250 +678,38 @@ void DualMarchingCubes::generateVertex(const Index& cell_index, uint8_t level, Q
     //TODO better vertex placement
 }
 
-void DualMarchingCubes::addToQEF(const Index& edge, uint orientation, float d,
+void SurfaceComponentStrategy::addToQEF(const Index& edge, Direction dir, float d,
                                  const Vector3f& n, QEF& qef) const {
     Vector3f p = Vector3f(edge.x,edge.y,edge.z);
-    p[orientation] += d;
+    p[dir] += d;
     p /= res;
     qef.add(n, p);
     qef.m += p;
 }
 
-void DualMarchingCubes::initQEF(const int8_t frontEdges[], const int8_t backEdges[], uint frontCount,
-                                uint backCount, const Index& cell_index, QEF& qef) const {
-    Vector3f n;
-    n.setZero(3);
-    float d = 0.0;
-    for (uint i = 0; i < frontCount; ++i) {
-        int e = frontEdges[i];
-        Index edge = cell_index + corner_delta[edge_corners[e][0]];
-        uint orientation = edge_orientation[e];
-        assert(sampler->frontEdgeInfo(orientation, edge, d, n));
-        addToQEF(edge, orientation, d, n, qef);
-    }
-    for (uint i = 0; i < backCount; ++i) {
-        int e = backEdges[i];
-        Index edge = cell_index + corner_delta[edge_corners[e][0]];
-        uint orientation = edge_orientation[e];
-        assert(sampler->backEdgeInfo(orientation, edge, d, n));
-        addToQEF(edge, orientation, d, n, qef);
-    }
-    qef.m /= frontCount + backCount;
-}
-
-void DualMarchingCubes::createVertexNodesFromEdges(DMCOctreeLeaf& leaf, const Index& leaf_index) {
-/*    int edgeConfig = sampler->edgeConfig(leaf_index);
-    int8_t frontEdges[8] = {-1,-1,-1,-1,-1,-1,-1,-1};
-    int8_t backEdges[8] = {-1,-1,-1,-1,-1,-1,-1,-1};
-    uint frontCount = 0;
-    uint backCount = 0;
-    bool inside = false; // the connected corners have an inside sign
-    for (int i = 0; i < 16; ++i) {
-        int corner = cornerTable[edgeConfig][i];
-        if (corner < 0) {
-            if (!inside) {
-                VertexNode* vNode = new VertexNode();
-                initQEF(frontEdges, backEdges, frontCount, backCount, leaf_index, vNode->qef);
-                generateVertex(leaf_index, sampler->leaf_level, vNode->qef, vNode->v);
-                vNode->computeError();
-                vNode->collapsable = true; // a leaf node is always collapsable
-                // assign vertex index to edges
-                for (uint e = 0; e < frontCount; ++e)
-                    leaf.frontEdgeVertices[frontEdges[e]] = leaf.vertices.size();
-                for (uint e = 0; e < backCount; ++e)
-                    leaf.backEdgeVertices[backEdges[e]] = leaf.vertices.size();
-                leaf.vertices.push_back(shared_ptr<VertexNode>(vNode));
-            }
-            frontCount = 0;
-            backCount = 0;
-            inside = false;
-            if (corner == -2)
-                break;
-        } else if (!inside) {
-            if (leaf.sign(corner)) {// inside (only connect over outside corners)
-                inside = true;
-                continue;
-            }
-            for (int j = 0; j < 3; ++j) { // 3 adjacent edges per corner
-                int e = corner_edges[corner][j];
-                uint frontCorner = edge_corners[e][0]; // corner associated with front cut of edge
-                uint orientation = edge_orientation[e];
-                Index edge = leaf_index + corner_delta[frontCorner];
-                // has asociated edge cut?
-                if (corner == frontCorner && sampler->hasFrontCut(orientation,edge))
-                    frontEdges[frontCount++] = e;
-                else if (corner != frontCorner && sampler->hasBackCut(orientation,edge))
-                    backEdges[backCount++] = e;
-
-            }
-        }
-    }*/
-}
-
-void DualMarchingCubes::initQEF(const vector<int>& edges, const Index& cell_index, QEF& qef) const {
-    Vector3f n;
-    n.setZero(3);
-    float d = 0.0;
-    for (int e : edges) {
-        int eIndex = e > 0? e-1 : -e-1;
-        Index edge = cell_index + corner_delta[edge_corners[eIndex][0]];
-        uint orientation = edge_orientation[eIndex];
-        if (e > 0)
-            sampler->frontEdgeInfo(orientation,edge,d,n);
-        else
-            sampler->backEdgeInfo(orientation,edge,d,n);
-        addToQEF(edge, orientation, d, n, qef);
-    }
-    qef.m /= edges.size();
-}
-
-void DualMarchingCubes::createVertexNodesFromNormalGroups(DMCOctreeLeaf &leaf, const Index &leaf_index) {
-/*    bool frontCuts[12] = {0};
-    bool backCuts[12] = {0};
-    int cutCount = 0;
-    for (int e = 0; e < 12; ++e) {
-        Index from = leaf_index + corner_delta[edge_corners[e][0]];
-        Index to = leaf_index + corner_delta[edge_corners[e][1]];
-        if (!sampler->sign(from) && sampler->sign(to))
-            frontCuts[e] = sampler->hasFrontCut(edge_orientation[e], from);
-        else if (!sampler->sign(to) && sampler->sign(from))
-            backCuts[e] = sampler->hasBackCut(edge_orientation[e], from);
-        else if (sampler->isComplex(edge_orientation[e], from)) {
-            frontCuts[e] = true;
-            backCuts[e] = true;
-        }
-        cutCount += frontCuts[e]? 1 : 0;
-        cutCount += backCuts[e]? 1 : 0;
-    }
-
-    int edgeConfig = 0;
-    for (int i = 0; i < 12; ++i) {
-        if (frontCuts[i] || backCuts[i]) {
-            edgeConfig |= 1 << i;
-        }
-    }
-
-    while (edgeConfig != 0) {
-
-        // retrieve possible surface components
-        vector<vector<int>> components = vector<vector<int>>(1, vector<int>());
-
-        for (int i = 0; i < 16; ++i) {
-            int corner = cornerTable[edgeConfig][i];
-            if (corner < 0) {
-                if (corner == -2)
-                    break;
-                components.push_back(vector<int>());
-            } else {
-                for (int j = 0; j < 3; ++j) { // 3 adjacent edges per corner
-                    int e = corner_edges[corner][j];
-                    uint frontCorner = edge_corners[e][0]; // corner associated with front cut of edge
-                    if (corner == frontCorner) {
-                        if (frontCuts[e])
-                            components.back().push_back(e+1);
-                        else if (backCuts[e])
-                            components.back().push_back(-e-1);
-                    } else {
-                        if (backCuts[e])
-                            components.back().push_back(-e-1);
-                        else if (frontCuts[e])
-                            components.back().push_back(e+1);
-                    }
-                }
-            }
-        }
-
-        // calculate best next component
-        Vector3f n(0,0,0);
-        float d; // not needed
-        float bestDeviation = -2.0; // the best max normal deviation of all components
-        uint best = 0; // the index of the best component
-        for (uint i = 0; i < components.size(); i++) {
-            float deviation = 1.0; //the max normal deviation (dot product [-1,1], higher is better) of this component
-            vector<Vector3f> normals;
-            for (int e : components[i]) { // iterate over edge cuts of this component
-                int eIndex = e > 0? e-1 : -e-1;
-                Index edge = leaf_index + corner_delta[edge_corners[eIndex][0]];
-                if (e > 0) {
-                    if (!sampler->frontEdgeInfo(edge_orientation[eIndex],edge,d,n))
-                        std::cout << leaf_index.x << " " << leaf_index.y  <<  " "  << leaf_index.z << std::endl;
-                } else {
-                    if(!sampler->backEdgeInfo(edge_orientation[eIndex],edge,d,n)) {
-                        std::cout << leaf_index.x << " " << leaf_index.y  <<  " "  << leaf_index.z << std::endl;
-                    }
-                }
-                for (Vector3f normal : normals) {
-                    float dev = normal.transpose()*n;
-                    deviation = std::min(deviation, dev);
-                }
-                normals.push_back(n);
-
-            }
-            if (bestDeviation + 0.01 < deviation || (bestDeviation < deviation && components[best].size() < cutCount)
-                    || (bestDeviation < deviation + 0.01 && components[i].size() == cutCount)) {
-                best = i;
-                bestDeviation = deviation;
-            }
-        }
-
-        // create vertex node for the best surface component
-        VertexNode* vNode = new VertexNode();
-        initQEF(components[best], leaf_index, vNode->qef);
-        generateVertex(leaf_index, sampler->leaf_level, vNode->qef, vNode->v);
-        vNode->computeError();
-        vNode->collapsable = true; // a leaf node is always collapsable
-        // assign vertex index to edges
-        for (int e : components[best]) {
-            if (e > 0) {
-                leaf.frontEdgeVertices[e-1] = leaf.vertices.size();
-                frontCuts[e-1] = false; // remove the edge cut
-                cutCount--;
-            } else {
-                leaf.backEdgeVertices[-e-1] = leaf.vertices.size();
-                backCuts[-e-1] = false; // remove the edge cut
-                cutCount--;
-            }
-        }
-        leaf.vertices.push_back(shared_ptr<VertexNode>(vNode));
-
-        // update edge config of cell
-        edgeConfig = 0;
-        for (int e = 0; e < 12; ++e) {
-            if (frontCuts[e] || backCuts[e])
-                edgeConfig |= 1 << e;
-        }
-    }
-
-*/
-}
-
-void DualMarchingCubes::initQEF(const int8_t edges[], uint count, const Index& cell_index, QEF& qef) {
+void MCStrategy::initQEF(const int8_t edges[], uint count, DMCOctreeLeaf* leaf, const Index& cell_index, QEF& qef) const {
     uint cuts = 0;
     for (uint i = 0; i < count; ++i) {
         int e = edges[i];
         const Index frontCorner = cell_index + corner_delta[edge_corners[e][0]];
-        const Index backCorner = cell_index + corner_delta[edge_corners[e][1]];
 
         Vector3f n;
         float d;
-        uint orientation = edge_orientation[e];
-        bool s0 = signSampler->sign(frontCorner);
-        bool s1 = signSampler->sign(backCorner);
-        if ((!s0 && s1 && sampler->frontEdgeInfo(orientation, frontCorner, d, n))
-                || (s0 && !s1 && sampler->backEdgeInfo(orientation, frontCorner, d, n))) {
-            addToQEF(frontCorner, orientation, d, n, qef);
+        Direction dir = edge_dir[e];
+        bool s0 = leaf->sign(edge_corners[e][0]);
+        bool s1 = leaf->sign(edge_corners[e][1]);
+        if ((!s0 && s1 && sampler->edgeInfo(dir, FRONT, frontCorner, d, n))
+                || (s0 && !s1 && sampler->edgeInfo(dir, BACK, frontCorner, d, n))) {
+            addToQEF(frontCorner, dir, d, n, qef);
             cuts++;
         }
     }
-
+    if (cuts == 0)
+        std::cout << "0 cuts" << std::endl;
     qef.m /= cuts;
 }
 
-void DualMarchingCubes::createVertexNodes(DMCOctreeLeaf* leaf, const Index &leaf_index) {
-    //if (sampler->hasComplexEdge(leaf_index))
-        //createVertexNodesFromNormalGroups(leaf, leaf_index);
-        //createVertexNodesFromEdges(leaf, leaf_index);
-    //else
+void MCStrategy::createVertexNodes(DMCOctreeLeaf* leaf, const Index &leaf_index) const {
 
     uint vCount = vertexCount[leaf->signConfig];
     if (vCount == 0)
@@ -904,13 +720,14 @@ void DualMarchingCubes::createVertexNodes(DMCOctreeLeaf* leaf, const Index &leaf
         int edge = edgeTable[leaf->signConfig][i];
         if (edge < 0) {
             VertexNode* vNode = new VertexNode();
-            initQEF(vEdges, count, leaf_index, *(vNode->qef));
-            generateVertex(leaf_index, leaf_level, *(vNode->qef), vNode->v);
+            initQEF(vEdges, count, leaf, leaf_index, *(vNode->qef));
+            vertexStrategy->generateVertex(leaf_index, leaf->level, res, *(vNode->qef), vNode->v);
             vNode->computeError();
             vNode->collapsable = true; // a leaf node is always collapsable
             // assign vertex index to edges
             for (uint e = 0; e < count; ++e) {
-                leaf->edgeVertices[vEdges[e]] = leaf->vertices.size();
+                leaf->frontEdgeVertices[vEdges[e]] = leaf->vertices.size();
+                leaf->backEdgeVertices[vEdges[e]] = leaf->vertices.size();
             }
             leaf->vertices.push_back(shared_ptr<VertexNode>(vNode));
 
@@ -920,29 +737,180 @@ void DualMarchingCubes::createVertexNodes(DMCOctreeLeaf* leaf, const Index &leaf
         } else
             vEdges[count++] = edge;
     }
-
 }
+
+void ThinShelledStrategy::initQEF(int comp[10], int size, HermiteData* frontCuts[12], HermiteData* backCuts[12], const Index &leaf_index,QEF& qef) const {
+    int edge = 0;
+    const HermiteData* data = nullptr;
+    for (int i = 0; i < size; i++) { // iterate over edge cuts of this component
+        edge = comp[i];
+        if (edge > 0) {
+            edge -= 1;
+            if (frontCuts[edge])
+                data = frontCuts[edge];
+            else {
+                data = backCuts[edge];
+                comp[i] *= -1;
+            }
+        } else {
+            edge = -edge-1;
+            if (backCuts[edge])
+                data = backCuts[edge];
+            else {
+                data = frontCuts[edge];
+                comp[i] *= -1;
+            }
+        }
+        Index e = leaf_index + corner_delta[edge_corners[edge][0]];
+        Vector3f p = Vector3f(e.x,e.y,e.z);
+        p[edge_dir[edge]] += data->d;
+        p /= res;
+        qef.add(data->n, p);
+        qef.m += p;
+    }
+
+    qef.m /= size;
+}
+
+
+float ThinShelledStrategy::compRank(int comp[10], int size, HermiteData* frontCuts[12], HermiteData* backCuts[12]) const {
+    float deviation = 1.0; //the max normal deviation (dot product [-1,1], higher is better) of this component
+    vector<Vector3f*> normals;
+    int edge = 0;
+    HermiteData* data = nullptr;
+    for (int i = 0; i < size; ++i) { // iterate over edge cuts of this component
+        edge = comp[i];
+        if (edge > 0) {
+            edge -= 1;
+            if (frontCuts[edge])
+                data = frontCuts[edge];
+            else
+                data = backCuts[edge];
+        } else {
+            edge = -edge-1;
+            if (backCuts[edge])
+                data = backCuts[edge];
+            else
+                data = frontCuts[edge];
+        }
+        for (Vector3f* normal : normals)
+            deviation = std::min(deviation, (float) (normal->transpose()*data->n));
+
+        normals.push_back(&data->n);
+    }
+    return deviation;
+}
+
+void ThinShelledStrategy::createVertexNodes(DMCOctreeLeaf *leaf, const Index &leaf_index) const{
+    // gather edge data of this cell
+    HermiteData* frontCuts[12] = {nullptr};
+    HermiteData* backCuts[12] = {nullptr};
+    int cutCount = 0;
+    for (int e = 0; e < 12; ++e) {
+        Index edge = leaf_index + corner_delta[edge_corners[e][0]];
+        bool s0 = leaf->sign(edge_corners[e][0]);
+        bool s1 = leaf->sign(edge_corners[e][1]);
+        if (!s0 && s1) {
+            frontCuts[e] = sampler->edgeInfo(edge_dir[e], FRONT, edge);
+            cutCount++;
+        } else if (s0 && !s1) {
+            backCuts[e] = sampler->edgeInfo(edge_dir[e], BACK, edge);
+            cutCount++;
+        } else if (!s0 && !s1 && sampler->hasCut(edge_dir[e], FRONT, edge) && sampler->hasCut(edge_dir[e], BACK, edge)) {
+            frontCuts[e] = sampler->edgeInfo(edge_dir[e], FRONT, edge);
+            backCuts[e] = sampler->edgeInfo(edge_dir[e], BACK, edge);
+            cutCount += 2;
+        }
+    }
+    int bestComp[10] = {0};
+    int comp[10] = {0};
+    int c = 0;
+    int bestSize = 0;
+    float bestRank = -2;
+    while (cutCount > 0) {
+        bestRank = -2;
+        // compute edge configuration
+        int edgeConfig = 0;
+        for (int i = 0; i < 12; ++i) {
+            if (frontCuts[i] || backCuts[i]) {
+                edgeConfig |= 1 << i;
+            }
+        }
+
+        // iterate over all possible surface components for this edgeconfig
+        for (int i = 0; i < 32; ++i) {
+            int edge = compEdgeTable[edgeConfig][i];
+            if (edge == 0) { // no more components
+                c = 0;
+                break;
+            }
+            if (edge == -13) { // end of component
+                float rank = compRank(comp, c, frontCuts, backCuts);
+                // compare rank (normal deviation) of the component
+                if (rank > bestRank || (c == cutCount && bestRank-rank < eps_normal_dev)) {
+                    copy(comp, comp+c, bestComp);
+                    bestSize = c;
+                    bestRank = rank;
+                }
+                c = 0;
+            } else { // add to current component
+                comp[c++] = edge;
+            }
+        }
+
+        // create vertex node for the best surface component
+        VertexNode* vNode = new VertexNode();
+        initQEF(bestComp, bestSize, frontCuts, backCuts, leaf_index, *(vNode->qef));
+        vertexStrategy->generateVertex(leaf_index, sampler->leaf_level, res, *(vNode->qef), vNode->v);
+        vNode->computeError();
+        vNode->collapsable = true; // a leaf node is always collapsable
+
+        // assign vertex index to edges
+        int edge = 0;
+        for (int i = 0; i < bestSize; ++i) { // iterate over edge cuts of this component
+            edge = bestComp[i];
+            if (edge > 0) {
+                edge -= 1;
+                leaf->frontEdgeVertices[edge] = leaf->vertices.size();
+                frontCuts[edge] = nullptr; // remove edge cut
+            } else {
+                edge = -edge-1;
+                leaf->backEdgeVertices[edge] = leaf->vertices.size();
+                backCuts[edge] = nullptr; // remove edge cut
+            }
+            cutCount--;
+        }
+        leaf->vertices.push_back(shared_ptr<VertexNode>(vNode));
+    }
+}
+
+
 
 DMCOctreeCell* DualMarchingCubes::createOctreeNodes(uint size, const Index& index, uint8_t level) {
     uint child_size = size/2;
     if (level == leaf_level) {
        uint8_t signConfig = signSampler->signConfig(index);
-       if (signConfig == 0 || signConfig == 255) // homogeneous sign config
+       if (signConfig == 255 || !signSampler->contributes(index)) // inside sign config or no conributing cut
            return nullptr;
 
        DMCOctreeLeaf* node = new DMCOctreeLeaf(level);
-       node->signConfig = signSampler->signConfig(index);
-       createVertexNodes(node, index);
+       node->signConfig = signConfig;
+       componentStrategy->createVertexNodes(node, index);
        return node;
     }
 
-    bool homogeneous = true; // true if every child cell has a homogeneous sign config
+
+    bool homogeneous = true; // true if every child cell is homogeneous
     DMCOctreeCell* children[8];
     for (int i = 0; i < 8; ++i) {
         children[i] = nullptr;
         Index child_index = index + child_size*child_origin[i];
-        children[i] = createOctreeNodes(child_size, child_index, level+1);
+        children[i] = createOctreeNodes(child_size, child_index, level+1);        
         homogeneous &= !children[i];
+        if (level == 0)
+            cout << endl;
+        if (level == 1)
+            cout << i << "..";
     }
 
     if (!homogeneous) {
@@ -1086,110 +1054,15 @@ void DualMarchingCubes::vertices(aligned_vector3f &positions, aligned_vector3f &
     bfs(builder, true);
 }
 
-bool DualMarchingCubes::initShaderProgram(const char *vname, const char *fname, QGLShaderProgram& program) {
-    setlocale(LC_NUMERIC, "C");
-    // shader
-    if (!program.addShaderFromSourceFile(QGLShader::Vertex, vname))
-        return false;
 
-    if (!program.addShaderFromSourceFile(QGLShader::Fragment, fname))
-        return false;
+bool DualMarchingCubes::conturing(RenderStrategy* scene, float voxelGridRadius, uint resolution) {
+    programEdgeScan.removeAllShaders();
+    programHermiteScan.removeAllShaders();
 
-    if (!program.link())
-        return false;
-
-    if (!program.bind())
-        return false;
-
-    return true;
-}
-
-void DualMarchingCubes::projectionX(const Index& node_index, QMatrix4x4& projection) {
-    float subGridSize = cell_size*workRes;
-    float subVoxelGridSize = subGridSize + cell_size;
-    float left = cell_size*node_index.z - voxelGridRadius;
-    float right = left + subVoxelGridSize;
-    float bottom = cell_size*node_index.y - voxelGridRadius;
-    float top = bottom + subVoxelGridSize;
-    // do not shift near and far plane here (small overlap for border points)
-    float n = -cell_size*node_index.x + voxelGridRadius;
-    float f = n-subVoxelGridSize;
-    projection.ortho(left, right, bottom, top, -n, -f);
-}
-
-void DualMarchingCubes::projectionY(const Index& node_index, QMatrix4x4& projection) {
-    float subGridSize = cell_size*workRes;
-    float subVoxelGridSize = subGridSize + cell_size;
-    float left = cell_size*node_index.x - voxelGridRadius;
-    float right = left + subVoxelGridSize;
-    float bottom = cell_size*node_index.z - voxelGridRadius;
-    float top = bottom + subVoxelGridSize;
-    // do not shift near and far plane here (small overlap for border points)
-    float n = -cell_size*node_index.y + voxelGridRadius;
-    float f = n-subVoxelGridSize;
-    projection.setToIdentity();
-    projection.ortho(left, right, bottom, top, -n, -f);
-}
-
-void DualMarchingCubes::projectionZ(const Index& node_index, QMatrix4x4& projection) {
-    float subGridSize = cell_size*workRes;
-    float subVoxelGridSize = subGridSize + cell_size;
-    float left = -cell_size*(node_index.x+workRes+1) + voxelGridRadius;
-    float right = left + subVoxelGridSize;
-    float bottom = cell_size*node_index.y - voxelGridRadius;
-    float top = bottom + subVoxelGridSize;
-    // do not shift near and far plane here (small overlap for border points)
-    float n = -cell_size*node_index.z + voxelGridRadius;
-    float f = n-subVoxelGridSize;
-    projection.setToIdentity();
-    projection.ortho(left, right, bottom, top, -n, -f);
-}
-
-DMCOctreeCell* DualMarchingCubes::conturing(uint currentRes, const Index& node_index, uint8_t level) {
-    if (workRes < currentRes) {
-        DMCOctreeCell* node = new DMCOctreeNode(level);
-        for (int i = 0; i < 8; ++i) {
-            uint newRes = currentRes/2;
-            Index child_index = node_index + newRes*child_origin[i];
-
-            node->setChild(i, conturing(newRes, child_index, level+1));
-        }
-        clusterCell(node_index, node);
-        return node;
-    } else {
-
-        std::cout << "scan hermite data (" << currentRes << ")" << std::endl;
-        CompressedHermiteScanner hermiteScanner(currentRes);
-        hermiteScanner.program = &programHermiteScan;
-
-        projectionX(node_index, hermiteScanner.projection);
-        hermiteScanner.scan(scene, X);
-        projectionY(node_index, hermiteScanner.projection);
-        hermiteScanner.scan(scene, Y);
-        projectionZ(node_index, hermiteScanner.projection);
-        hermiteScanner.scan(scene, Z);
-        sampler.reset();
-        sampler = unique_ptr<HermiteDataSampler>(new CompressedHermiteSampler(hermiteScanner.data, node_index));
-        std::cout << "create octree (" << currentRes << ")" << std::endl;
-
-        DMCOctreeCell* node = createOctreeNodes(currentRes, node_index, level);
-        if (!node) {
-            node = new DMCHomogeneousCell(level, signSampler->sign(node_index));
-        }
-        return node;
-
-    }
-
-}
-
-bool DualMarchingCubes::conturing(RenderStrategy* scene, float voxelGridRadius, uint resolution, uint workResolution) {
-    initializeOpenGLFunctions();
     if(!scene->initShaders(programEdgeScan, programHermiteScan))
         return false;
-
     this->scene = scene;
     this->res = nextPowerOf2(resolution);
-    this->workRes = min(nextPowerOf2(workResolution), res);
     this->voxelGridRadius = voxelGridRadius;
     this->cell_size = 2*voxelGridRadius/(resolution+1);
     this->leaf_level = i_log2(res);
@@ -1200,20 +1073,38 @@ bool DualMarchingCubes::conturing(RenderStrategy* scene, float voxelGridRadius, 
 
     //shift near and far plane about a half voxel cell
     //because rays are casted from the pixel center
-    edgeScanner.projection.ortho(-voxelGridRadius, voxelGridRadius,
-                                 -voxelGridRadius, voxelGridRadius,
-                                 -voxelGridRadius + 0.5*cell_size,
-                                 voxelGridRadius - 0.5*cell_size);
+    QMatrix4x4 projection;
+    projection.ortho(-voxelGridRadius, voxelGridRadius,
+                     -voxelGridRadius, voxelGridRadius,
+                     -voxelGridRadius + 0.5*cell_size,
+                     voxelGridRadius - 0.5*cell_size);
+    edgeScanner.projection = projection;
+    edgeScanner.scan(scene);
 
-    edgeScanner.scan(scene, X);
-    edgeScanner.scan(scene, Y);
-    edgeScanner.scan(scene, Z);
     std::cout << "create sign sampler (flood fill)" << std::endl;
-    signSampler = unique_ptr<SignSampler>(new CompressedSignSampler(edgeScanner.data.get()));
+    signSampler = unique_ptr<SignSampler>(new CompressedSignSampler(edgeScanner.data));
 
-    root = unique_ptr<DMCOctreeCell>(conturing(res, Index(0), 0));
-    //signSampler.reset();
-    //sampler.reset();
+    std::cout << "scan hermite data (" << resolution << ")" << std::endl;
+    HermiteScanner hermiteScanner(res, signSampler->contributingIntersections);
+    hermiteScanner.program = &programHermiteScan;
+    hermiteScanner.projection = projection;
+    hermiteScanner.scan(scene);
+
+    sampler = unique_ptr<HermiteDataSampler>(new SparseHermiteSampler(hermiteScanner.data));
+    hermiteScanner.data = nullptr;
+    componentStrategy->sampler = sampler.get();
+    componentStrategy->res = res;
+
+    std::cout << "create octree (" << res << ")" << std::endl;
+    DMCOctreeCell* node = createOctreeNodes(res, Index(0), 0);
+    if (!node)
+        node = new DMCHomogeneousCell(0, signSampler->sign(Index(0)));
+    root = unique_ptr<DMCOctreeCell>(node);
+
+    signSampler.reset();
+    sampler.reset();
+
+    return true;
 /*
     CompressedHermiteScanner hermiteScanner(workResolution);
     hermiteScanner.program = &programHermiteScan;
