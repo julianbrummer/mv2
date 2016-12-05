@@ -10,10 +10,6 @@ layout(std140, binding = 1) buffer trafo {
     mat4 mMat[];
 };
 
-layout(std140, binding = 2) buffer trafo_normal {
-    mat3 nMat[];
-};
-
 struct Position {
     vec3 world; // world space
     vec4 clip; // clip space
@@ -36,7 +32,7 @@ void main() {
     v_out.instanceID = gl_InstanceID + gl_BaseInstanceARB;
     vec4 p = mMat[v_out.instanceID] * vec4(a_position,1.0);
     v_out.pos_object = a_position;
-    v_out.normal = normalize(nMat[gl_InstanceID + gl_BaseInstanceARB] * a_normal);
+    v_out.normal = normalize(mat3(mMat[gl_InstanceID + gl_BaseInstanceARB]) * a_normal);
     v_out.pos.world = p.xyz;
     v_out.pos.clip = uVPMat * p;
     gl_Position = v_out.pos.clip;

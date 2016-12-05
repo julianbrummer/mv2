@@ -57,7 +57,7 @@ void emitPatch(Position v0, Position v1, Position v2, Position v3) {
     emitTriangle(v2.clip, v1.clip, v3.clip, normal);
 }
 
-// emits the patch generated m triangle edge (a,b)
+// emits the patch generated from triangle edge (a,b)
 // for now: a patch is only emitted if both vertices of the edge are translated in positive or negative triangle normal direction,
 // 			so the case of two translated vertices on different sides of the original triangle is not handled.
 // a = first vertex index of edge

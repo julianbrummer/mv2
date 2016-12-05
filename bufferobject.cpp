@@ -2,16 +2,51 @@
 #include <iostream>
 using namespace Eigen;
 
-SSBO::SSBO(int bindingPoint, int std140Size, int usage) {
+ACBO::ACBO(int bindingPoint, int size, int usage) : usage(usage) {
+    initializeOpenGLFunctions();
+    glGenBuffers(1, &id);
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, id);
+    glBufferData(GL_ATOMIC_COUNTER_BUFFER, size, 0, usage);
+    glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, bindingPoint, id);
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0);
+}
+
+ACBO& ACBO::bufferData(GLsizeiptr size, const GLvoid* data) {
+    glBufferData(GL_ATOMIC_COUNTER_BUFFER, size, data, usage);
+    return *this;
+}
+
+ACBO& ACBO::bufferSubData(GLintptr offset, GLsizeiptr size, const GLvoid* data) {
+    glBufferSubData(GL_ATOMIC_COUNTER_BUFFER, offset, size, data);
+    return *this;
+}
+
+ACBO& ACBO::getBufferSubData(GLintptr offset, GLsizeiptr size, GLvoid* data) {
+    glGetBufferSubData(GL_ATOMIC_COUNTER_BUFFER, offset, size, data);
+    return *this;
+}
+
+void ACBO::bind() {
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, id);
+}
+void ACBO::unBind() {
+    glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, 0);
+}
+
+ACBO::~ACBO() {
+    glDeleteBuffers(1, &id);
+}
+
+SSBO::SSBO(int bindingPoint, int stdSize, int usage) : usage(usage) {
     initializeOpenGLFunctions();
     glGenBuffers(1, &id);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, id);
-    glBufferData(GL_SHADER_STORAGE_BUFFER, std140Size, 0, usage);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, stdSize, 0, usage);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, bindingPoint, id);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 }
 
-SSBO& SSBO::bufferData(GLsizeiptr size, const GLvoid* data, GLenum usage) {
+SSBO& SSBO::bufferData(GLsizeiptr size, const GLvoid* data) {
     glBufferData(GL_SHADER_STORAGE_BUFFER, size, data, usage);
     return *this;
 }

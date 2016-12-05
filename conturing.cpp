@@ -44,59 +44,65 @@ double cellSize(uint level) {
 
 
 Index operator *(const Index& index, uint s) {
-    return Index(s*index.x, s*index.y, s*index.z);
+    return Index(s*index.x(), s*index.y(), s*index.z());
 }
 Index operator *(uint s, const Index& index) {
-    return Index(s*index.x, s*index.y, s*index.z);
+    return Index(s*index.x(), s*index.y(), s*index.z());
 }
 
 std::ostream& operator <<(std::ostream& os, const Index &obj) {
-    os << obj.x << " " << obj.y << " " << obj.z;
+    os << obj.x() << " " << obj.y() << " " << obj.z();
     return os;
 }
 
 Index Index::operator /(uint d) const{
-    return Index(x/d, y/d, z/d);
+    return Index(v[0]/d, v[1]/d, v[2]/d);
 }
 
 Index Index::operator +(const Index& index) const {
-    return Index(x+index.x, y+index.y, z+index.z);
+    return Index(v[0]+index.v[0], v[1]+index.v[1], v[2]+index.v[2]);
 }
 
 Index Index::operator -(const Index& index) const {
-    return Index(x-index.x, y-index.y, z-index.z);
+    return Index(v[0]-index.v[0], v[1]-index.v[1], v[2]-index.v[2]);
 }
 
 inline bool Index::operator <(uint xyz) const {
-    return x < xyz && y < xyz && z < xyz;
+    return v[0] < xyz && v[1] < xyz && v[2] < xyz;
 }
 
 inline bool Index::operator >(uint xyz) const {
-    return x > xyz && y > xyz && z > xyz;
+    return v[0] > xyz && v[1] > xyz && v[2] > xyz;
 }
 
 bool Index::operator == (const Index& rhs) const{
-    return x == rhs.x && y == rhs.y && z == rhs.z;
+    return v[0] == rhs.v[0] && v[1] == rhs.v[1] && v[2] == rhs.v[2];
 }
 
 bool Index::operator != (const Index& rhs) const{
     return !(*this == rhs);
 }
 
-uint& Index::operator [](uint orientation) {
-    return orientation == 0? x : (orientation == 1? y : z);
+uint& Index::operator [](uint dir) {
+    return v[dir];
 }
 
 Index Index::shiftX(int shift) const {
-    return Index(x+shift,y,z);
+    return Index(v[0]+shift,v[1],v[2]);
 }
 
 Index Index::shiftY(int shift) const {
-    return Index(x,y+shift,z);
+    return Index(v[0],v[1]+shift,v[2]);
 }
 
 Index Index::shiftZ(int shift) const {
-    return Index(x,y,z+shift);
+    return Index(v[0],v[1],v[2]+shift);
+}
+
+Index Index::shift(uint dir, int shift) const {
+    Index i(v[0],v[1],v[2]);
+    i.v[dir] += shift;
+    return i;
 }
 
 bool Intersection::operator == (const Intersection& rhs) const{
@@ -137,16 +143,8 @@ inline uint GridSampler::nodeSize(uint level) const {
     return 1 << (leaf_level - level);
 }
 
-inline bool SignSampler::contributes(const Intersection &i) const {
-    return contributingIntersections.count(i) > 0;
-}
-
-bool SignSampler::contributes(const Index &node_origin) const {
-    return contributingCells.count(node_origin) > 0;
-}
-
 inline bool SignSampler::sign(const Index& index) const {
-    return sign(index.x, index.y, index.z);
+    return sign(index.x(), index.y(), index.z());
 }
 
 uint8_t SignSampler::signConfig(const Index &node_origin) const {
@@ -161,11 +159,15 @@ uint8_t SignSampler::signConfig(const Index &node_origin) const {
     return config;
 }
 
+bool SignSampler::contributes(const Index &cell_origin) const {
+    return contributingCells.count(cell_origin) > 0;
+}
+
 
 void SignSampler::inside(float voxelGridRadius, aligned_vector3f &positions) {
-    float o = -voxelGridRadius+voxelGridRadius/size;
+    float o = -voxelGridRadius;
     Vector3f origin(o,o,o);
-    float cellSize = 2*voxelGridRadius/size;
+    float cellSize = 2*voxelGridRadius/res;
     for (uint x = 0; x < size; ++x) {
         for (uint y = 0; y < size; ++y) {
             for (uint z = 0; z < size; ++z) {
@@ -200,8 +202,8 @@ bool HermiteDataSampler::hasCut(Direction dir, const Index &edge) const {
 }
 
 void HermiteDataSampler::edgeIntersections(float voxelGridRadius, aligned_vector3f& positions, aligned_vector3f& colors) {
-    float cellSize = 2*voxelGridRadius/size;
-    float o = -voxelGridRadius+cellSize/2;
+    float cellSize = 2*voxelGridRadius/res;
+    float o = -voxelGridRadius;
     Vector3f origin(o,o,o);
     float d = 0.0;
     Vector3f n(0,0,0);

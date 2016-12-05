@@ -167,8 +167,8 @@ void DMCOctreeLeaf::flipSign(uint i) {
 
 void DMCVerticesBuilder::handle(const DMCOctreeCell *node, const Index &index) {
     // push vertices
-    offset[node->level][index.x][index.y][index.z] = positions.size();
-    count[node->level][index.x][index.y][index.z] = node->vertices.size() + node->strayVertices.size();
+    offset[node->level][index.x()][index.y()][index.z()] = positions.size();
+    count[node->level][index.x()][index.y()][index.z()] = node->vertices.size() + node->strayVertices.size();
     for (const shared_ptr<VertexNode> vNode : node->vertices) {
         positions.push_back(vNode->v);
         colors.push_back(vNode->collapsable? Color::WHITE : Color::RED);
@@ -667,7 +667,7 @@ void MapToQEFMinimum::generateVertex(const Index& cell_index, uint8_t level, uin
     Vector3d vQEF(0,0,0);
     qef.solve(truncation, vQEF); // relative to masscenter
     vQEF += qef.m.cast<double>();  // relative to cellGrid origin
-    Vector3d cell_origin(cell_index.x,cell_index.y, cell_index.z);
+    Vector3d cell_origin(cell_index.x(),cell_index.y(), cell_index.z());
     cell_origin /= res;
     double cell_size = cellSize(level);
     if (inCell(vQEF, cell_origin, cell_size, cell_size)) {
@@ -680,7 +680,7 @@ void MapToQEFMinimum::generateVertex(const Index& cell_index, uint8_t level, uin
 
 void SurfaceComponentStrategy::addToQEF(const Index& edge, Direction dir, float d,
                                  const Vector3f& n, QEF& qef) const {
-    Vector3f p = Vector3f(edge.x,edge.y,edge.z);
+    Vector3f p = Vector3f(edge.x(),edge.y(),edge.z());
     p[dir] += d;
     p /= res;
     qef.add(n, p);
@@ -762,7 +762,7 @@ void ThinShelledStrategy::initQEF(int comp[10], int size, HermiteData* frontCuts
             }
         }
         Index e = leaf_index + corner_delta[edge_corners[edge][0]];
-        Vector3f p = Vector3f(e.x,e.y,e.z);
+        Vector3f p = Vector3f(e.x(),e.y(),e.z());
         p[edge_dir[edge]] += data->d;
         p /= res;
         qef.add(data->n, p);
@@ -884,8 +884,6 @@ void ThinShelledStrategy::createVertexNodes(DMCOctreeLeaf *leaf, const Index &le
     }
 }
 
-
-
 DMCOctreeCell* DualMarchingCubes::createOctreeNodes(uint size, const Index& index, uint8_t level) {
     uint child_size = size/2;
     if (level == leaf_level) {
@@ -905,7 +903,7 @@ DMCOctreeCell* DualMarchingCubes::createOctreeNodes(uint size, const Index& inde
     for (int i = 0; i < 8; ++i) {
         children[i] = nullptr;
         Index child_index = index + child_size*child_origin[i];
-        children[i] = createOctreeNodes(child_size, child_index, level+1);        
+        children[i] = createOctreeNodes(child_size, child_index, level+1);
         homogeneous &= !children[i];
         if (level == 0)
             cout << endl;
@@ -929,7 +927,6 @@ DMCOctreeCell* DualMarchingCubes::createOctreeNodes(uint size, const Index& inde
     }
 
     return nullptr;
-
 
 }
 
@@ -1064,25 +1061,35 @@ bool DualMarchingCubes::conturing(RenderStrategy* scene, float voxelGridRadius, 
     this->scene = scene;
     this->res = nextPowerOf2(resolution);
     this->voxelGridRadius = voxelGridRadius;
-    this->cell_size = 2*voxelGridRadius/(resolution+1);
+    this->cell_size = 2*voxelGridRadius/res;
     this->leaf_level = i_log2(res);
 
-    std::cout << "scan edge intersections (" << resolution << ")" << std::endl;
-    CompressedEdgeScanner edgeScanner(resolution);
+    std::cout << "scan edge intersections (" << res << ")" << std::endl;
+    CompressedEdgeScanner edgeScanner(res);
     edgeScanner.program = &programEdgeScan;
 
     //shift near and far plane about a half voxel cell
     //because rays are casted from the pixel center
     QMatrix4x4 projection;
-    projection.ortho(-voxelGridRadius, voxelGridRadius,
-                     -voxelGridRadius, voxelGridRadius,
-                     -voxelGridRadius + 0.5*cell_size,
-                     voxelGridRadius - 0.5*cell_size);
+    projection.ortho(-voxelGridRadius + 0.5*cell_size, voxelGridRadius - 0.5*cell_size,
+                     -voxelGridRadius + 0.5*cell_size, voxelGridRadius - 0.5*cell_size,
+                     -voxelGridRadius,
+                     voxelGridRadius);
     edgeScanner.projection = projection;
     edgeScanner.scan(scene);
 
     std::cout << "create sign sampler (flood fill)" << std::endl;
+
     signSampler = unique_ptr<SignSampler>(new CompressedSignSampler(edgeScanner.data));
+    edgeScanner.data = nullptr;
+/*
+    std::cout << "find contributing intersections ";
+    set<Intersection> intersections;
+    set<Index> cells;
+    findContributing(intersections, cells);
+    std::cout << intersections.size() << std::endl;
+*/
+
 
     std::cout << "scan hermite data (" << resolution << ")" << std::endl;
     HermiteScanner hermiteScanner(res, signSampler->contributingIntersections);
@@ -1101,8 +1108,8 @@ bool DualMarchingCubes::conturing(RenderStrategy* scene, float voxelGridRadius, 
         node = new DMCHomogeneousCell(0, signSampler->sign(Index(0)));
     root = unique_ptr<DMCOctreeCell>(node);
 
-    signSampler.reset();
-    sampler.reset();
+    //signSampler.reset();
+    //sampler.reset();
 
     return true;
 /*

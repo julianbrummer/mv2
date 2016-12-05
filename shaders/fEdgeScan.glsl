@@ -47,8 +47,8 @@ layout(index=1) subroutine (writeToTexture) void writeFromYView(int snap, float 
 void writeToZ(int z) {
     int zTexCoord = z / 32;
     int offset = z - 32*zTexCoord;
-    imageAtomicOr(tex[gl_FrontFacing? 0 : 1], ivec3(res-int(gl_FragCoord.x),gl_FragCoord.y, zTexCoord), data[offset]);
-
+    //imageAtomicOr(tex[gl_FrontFacing? 0 : 1], ivec3(res-int(gl_FragCoord.x),gl_FragCoord.y, zTexCoord), data[offset]);
+    imageAtomicOr(tex[gl_FrontFacing? 0 : 1], ivec3(gl_FragCoord.x,gl_FragCoord.y, zTexCoord), data[offset]);
 }
 
 layout(index=2) subroutine (writeToTexture) void writeFromZView(int snap, float deviation) {
@@ -66,6 +66,15 @@ layout(index=2) subroutine (writeToTexture) void writeFromZView(int snap, float 
 void main() {
     float depth = gl_FragCoord.z*res;
     int snap = int(floor(depth));
-    writeToTextureFromView(snap, depth-snap);
+    float deviation = depth - snap;
+
+    if (deviation <= eps) {
+        writeToZ(snap-1);
+    } else if (deviation >= 1-eps) {
+        writeToZ(snap+1);
+    }
+    writeToZ(snap);
+
+    //writeToTextureFromView(snap, depth-snap);
 }
 

@@ -36,10 +36,10 @@ struct CompressedEdgeData {
     uint res, depth, size;
 
     CompressedEdgeData(uint res);
-    inline bool frontface_cut(uint orientation, const Index& index) const;
-    inline bool frontface_cut(uint orientation, uint x, uint y, uint z) const;
-    inline bool backface_cut(uint orientation, const Index& index) const;
-    inline bool backface_cut(uint orientation, uint x, uint y, uint z) const;
+    inline bool frontface_cut(uint dir, const Index &index) const;
+    inline bool backface_cut(uint dir, const Index &index) const;
+    inline bool frontface_cut(uint dir, uint x, uint y, uint z) const;
+    inline bool backface_cut(uint dir,  uint x, uint y, uint z) const;
 };
 
 struct CompressedSignData {
@@ -114,14 +114,13 @@ class SSBOTarget : public ScanTarget, QOpenGLFunctions_4_3_Core {
 public:
     unique_ptr<SSBO> buffer;
     SSBOTarget(set<Intersection>& intersections);
-    void endScan() override;
 };
 
 class CompressedEdgeScanner : public Scanner {
 public:
-    CompressedEdgeData data;
+    CompressedEdgeData* data;
     CompressedEdgeScanner(uint res)
-        : Scanner(new TextureTarget(res+1, res/32 + 1, 2), res), data(res) {}
+        : Scanner(new TextureTarget(res-1, res/32, 2), res), data(new CompressedEdgeData(res)) {}
     void transferData(Direction dir) override;
     void configureProgram() override;
     void configureProgram(Direction dir) override;
@@ -130,6 +129,7 @@ public:
 class HermiteScanner :  public Scanner {
 private:
     uint intersectCount;
+    HermiteData decode(uint code) const;
 public:
     HermiteIntersectionData* data;
     HermiteScanner(uint res, set<Intersection>& intersections)
@@ -141,15 +141,19 @@ public:
 
 class CompressedSignSampler : public SignSampler {
 private:
+
     CompressedEdgeData* edgeData;
     inline void stepForward(uint dir, const Index& edge, const Index &to, queue<Index>& indices);
     inline void stepBackward(uint dir, const Index& edge, const Index &to, queue<Index>& indices);
     void floodFill();
+    void floodFill1(CompressedSignData* data);
 public:
     CompressedSignData* data;
-    CompressedSignSampler(CompressedEdgeData& data);
+    CompressedSignSampler(CompressedEdgeData* data);
 
     bool sign(uint x, uint y, uint z) const override;
+    bool frontface_cut(uint dir, const Index &index) const override;
+    bool backface_cut(uint dir, const Index &index) const override;
     virtual ~CompressedSignSampler();
 };
 

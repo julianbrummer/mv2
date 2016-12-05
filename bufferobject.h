@@ -12,17 +12,32 @@
 using namespace Eigen;
 using namespace std;
 
+class ACBO : private QOpenGLFunctions_4_2_Core {
+public:
+    ACBO(int bindingPoint, int size, int usage);
+
+    ACBO& bufferData(GLsizeiptr size, const GLvoid* data);
+    ACBO& bufferSubData(GLintptr offset, GLsizeiptr size, const GLvoid* data);
+    ACBO& getBufferSubData(GLintptr offset, GLsizeiptr size, GLvoid* data);
+    void bind();
+    void unBind();
+    ~ACBO();
+    GLuint id;
+    GLenum usage;
+};
+
 class SSBO : private QOpenGLFunctions_4_3_Core {
 public:
-    SSBO(int bindingPoint, int std140Size, int usage);
+    SSBO(int bindingPoint, int stdSize, int usage);
 
-    SSBO& bufferData(GLsizeiptr size, const GLvoid* data, GLenum usage);
+    SSBO& bufferData(GLsizeiptr size, const GLvoid* data);
     SSBO& bufferSubData(GLintptr offset, GLsizeiptr size, const GLvoid* data);
     SSBO& getBufferSubData(GLintptr offset, GLsizeiptr size, GLvoid* data);
     void bind();
     void unBind();
     ~SSBO();
     GLuint id;
+    GLenum usage;
 };
 
 struct VBOInfo {

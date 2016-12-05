@@ -112,34 +112,6 @@ CGMainWindow::~CGMainWindow () {
 }
 
 /*
-void getFromStlFile(std::vector<QVector3D>& triangles, const char *filename) {
-    std::ifstream instream(filename,std::ios::binary);
-    if (!instream) {
-        std::cerr << "file does not exist!" << std::endl;
-        return;
-    }
-
-    instream.seekg( 80, std::ios_base::beg ); // skip ascii header
-    int trinum = 0;
-    instream.read((char*) &trinum, 4 ); // number of triangles
-    float tmp;
-    for(int k = 0; k < trinum; k++) {
-        for(int i=0;i < 3 ; i++ )
-            instream.read( (char*) &tmp, 4 );
-        for(int i = 0; i < 3; i++ ) {
-		qreal v[3];
-            for(int j = 0 ; j < 3 ; j++) {
-                instream.read( (char*) &tmp, 4 );
-                v[j] = tmp;
-            }
-            triangles.push_back(1000.0*QVector3D(v[0],v[1],v[2]));
-        }
-        instream.read( (char*) &tmp, 2);
-    }
-
-    instream.close();
-}
-
 
 void writeToStlFile(std::vector<QVector3D>& T, const char *filename) {
 	char buffer[80];
@@ -236,17 +208,13 @@ bool DefaultRenderStrategy::initShaders(QGLShaderProgram &programEdgeScan, QGLSh
     return true;
 }
 
-void DefaultRenderStrategy::subroutineSelection(GLuint index[2]) {
-    index[0] = 0;
-    index[1] = 2;
+GLuint DefaultRenderStrategy::subroutineSelection() {
+    return 0;
 }
 
 void DefaultRenderStrategy::render(QGLShaderProgram &program, const QMatrix4x4 &projection, const QMatrix4x4 &view) {
-    GLuint index[2];
-    subroutineSelection(index);
-    GLint subroutine_count = 0;
-    glGetProgramStageiv(program.programId(), GL_VERTEX_SHADER, GL_ACTIVE_SUBROUTINE_UNIFORM_LOCATIONS, &subroutine_count);
-    glUniformSubroutinesuiv(GL_VERTEX_SHADER, subroutine_count, &index[0]);
+    GLuint index = subroutineSelection();
+    glUniformSubroutinesuiv(GL_VERTEX_SHADER, 1, &index);
     doRender(program, projection, view);
 }
 
@@ -258,10 +226,8 @@ RenderSingleModel::RenderSingleModel(const Model *model) : model(model) {
 void RenderSingleModel::doRender(QGLShaderProgram &program, const QMatrix4x4 &projection, const QMatrix4x4 &view) {
     QMatrix4x4 PV = projection * view;
     Matrix4f M = model->getModelMatrix();
-    QMatrix4x4 qM = qMat(M);
     program.setUniformValue("uVPMat", PV);
-    program.setUniformValue("uMMat", qM);
-    program.setUniformValue("uNMat", qM.normalMatrix());
+    program.setUniformValue("uMMat", qMat(M));
     model->render(program);
 }
 
@@ -276,9 +242,7 @@ void RenderTrafoModel::doRender(QGLShaderProgram &program, const QMatrix4x4 &pro
     program.setUniformValue("uVPMat", PV);
     for (uint i = 0; i < trafo->size(); ++i) {
         Matrix4f M_trafo = model->getModelMatrix() * (*trafo)[i];
-        QMatrix4x4 qM = qMat(M_trafo);
-        program.setUniformValue("uMMat", qM);
-        program.setUniformValue("uNMat", qM.normalMatrix());
+        program.setUniformValue("uMMat", qMat(M_trafo));
         model->render(program);
         glFinish();
         glFlush();
@@ -294,16 +258,15 @@ RenderTrafoModelInstanced::RenderTrafoModelInstanced(const Model* model, const T
 }
 
 
-void RenderTrafoModelInstanced::subroutineSelection(GLuint index[2]) {
-    index[0] = 1;
-    index[1] = 3;
+GLuint RenderTrafoModelInstanced::subroutineSelection() {
+    return 1;
 }
 
 void RenderTrafoModelInstanced::doRender(QGLShaderProgram &program, const QMatrix4x4 &projection, const QMatrix4x4 &view) {
     QMatrix4x4 PV = projection * view;
     program.setUniformValue("uVPMat", PV);
     // render in instanced groups of size max_instance
-    //(too many instance at once slows down performance or even crashes the program)
+    //(too many instance at once slows down performance or even crash the program)
     int rendered_instances = 0;
     int max = trafo->size() - max_instances;
     while (rendered_instances < max) {
@@ -331,7 +294,7 @@ const float ConturingWidget::CAMERA_MOVEMENT_SPEED = 0.0025f;
 const float ConturingWidget::CAMERA_SCROLL_FACTOR = 1.2f;
 const float ConturingWidget::MIN_ERROR_THRESHOLD = 0.0f;
 const float ConturingWidget::MAX_ERROR_THRESHOLD = 0.0001f;
-const float ConturingWidget::DEFAULT_TRUNCATION = 0.05f;
+const float ConturingWidget::DEFAULT_TRUNCATION = 0.1f;
 
 ConturingWidget::ConturingWidget (CGMainWindow *mainwindow,QWidget* parent ) : QGLWidget (parent) {
     main = mainwindow;
@@ -353,9 +316,14 @@ void ConturingWidget::loadTrack() {
     QString filename = QFileDialog::getOpenFileName(this, "Load track ...", QString(), "(*.vda)" );
 
     if (filename.isEmpty()) return;
-        main->statusBar()->showMessage ("Loading track ...");
+    bool ok;
+    double d = QInputDialog::getDouble(this, "Scale Factor", "How do you want to scale the track?", 1.0, 0.0001,numeric_limits<double>::max(),1,&ok);
+    if (!ok) return;
 
-    double d = QInputDialog::getDouble(this, "How do you want to scale the track?", "Scale Factor", 1.0);
+    if (trafo)// remove model for new track
+        model = nullptr;
+    main->statusBar()->showMessage ("Loading track ...");
+
     trafo = unique_ptr<Trafo>(new Trafo());
     trafo->scale = d;
     LoadVdaFile(trafo->M,filename.toStdString().c_str(),trafo->scale, timestep);
@@ -381,6 +349,8 @@ void ConturingWidget::loadModel() {
     if (filename.endsWith(".off"))
         LoadOffFile(filename.toLatin1(), positions, normals);
 
+    if (model)// remove track for new model
+        trafo = nullptr;
     //LoadOffFile("D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/models/motor.off", positions, normals);
     model = unique_ptr<Model>(new Model(positions, normals, GL_TRIANGLES, true, 1.9f));
     if (trafo) {
@@ -424,16 +394,6 @@ void ConturingWidget::fillTrafoBuffers() {
         trafo_buffer->bufferSubData(i*64, 64, values);
     }
     trafo_buffer->unBind();
-
-    trafo_normal_buffer = unique_ptr<SSBO>(new SSBO(2, trafo->size()*48, GL_STATIC_DRAW));
-    trafo_normal_buffer->bind();
-    for (uint i = 0; i < trafo->size(); ++i) {
-        Matrix4f M_trafo = model->getModelMatrix() * (*trafo)[i];
-        QMatrix3x3 nMat = qMat(M_trafo).normalMatrix();
-        QMatrix4x4 padded_nMat = QMatrix4x4(nMat);
-        trafo_normal_buffer->bufferSubData(i*48, 48, padded_nMat.data());
-    }
-    trafo_normal_buffer->unBind();
 }
 
 void ConturingWidget::sliderValueChanged(int value) {
@@ -531,8 +491,8 @@ void ConturingWidget::paintGL() {
     if (dmcVertices && showDMCVertices) {
         bindDebugMesh(dmcVertices.get(), V, true);
         if (showCells)
-            dmcVertices->render(programDebug, v_offset[selectedLevel][selectedCell.x][selectedCell.y][selectedCell.z],
-                                v_count[selectedLevel][selectedCell.x][selectedCell.y][selectedCell.z]);
+            dmcVertices->render(programDebug, v_offset[selectedLevel][selectedCell.x()][selectedCell.y()][selectedCell.z()],
+                                v_count[selectedLevel][selectedCell.x()][selectedCell.y()][selectedCell.z()]);
         else {
             dmcVertices->render(programDebug, v_offset[selectedLevel][0][0][0],
                                 v_level_count[selectedLevel]);
@@ -540,8 +500,8 @@ void ConturingWidget::paintGL() {
     }
     if (cells && showCells) {
         uint levelSize = pow2(selectedLevel);
-        Vector3f position((float)selectedCell.x/levelSize, (float)selectedCell.y/levelSize, (float)selectedCell.z/levelSize);
-        position *= 2*cellGridRadius;
+        Vector3f position((float)selectedCell.x()/levelSize, (float)selectedCell.y()/levelSize, (float)selectedCell.z()/levelSize);
+        position *= 2*voxelGridRadius;
         cells->setPosition(origin+position);
         bindDebugMesh(cells.get(), V, false);
         cells->render(programDebug, selectedLevel*CELL_EDGES_VERTEX_COUNT, CELL_EDGES_VERTEX_COUNT);
@@ -634,14 +594,14 @@ void ConturingWidget::mouseMoveEvent(QMouseEvent* event) {
 
 void ConturingWidget::keyPressEvent(QKeyEvent* event) {
     switch (event->key()) {
-    case Qt::Key_8: if (selectedCell.z > 0) selectedCell = selectedCell.shiftZ(-1); break;
-    case Qt::Key_2: if (selectedCell.z < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftZ(1); break;
-    case Qt::Key_4: if (selectedCell.x > 0) selectedCell = selectedCell.shiftX(-1); break;
-    case Qt::Key_6: if (selectedCell.x < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftX(1); break;
-    case Qt::Key_7: if (selectedCell.y > 0) selectedCell = selectedCell.shiftY(-1); break;
-    case Qt::Key_9: if (selectedCell.y < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftY(1); break;
+    case Qt::Key_8: if (selectedCell.z() > 0) selectedCell = selectedCell.shiftZ(-1); break;
+    case Qt::Key_2: if (selectedCell.z() < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftZ(1); break;
+    case Qt::Key_4: if (selectedCell.x() > 0) selectedCell = selectedCell.shiftX(-1); break;
+    case Qt::Key_6: if (selectedCell.x() < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftX(1); break;
+    case Qt::Key_7: if (selectedCell.y() > 0) selectedCell = selectedCell.shiftY(-1); break;
+    case Qt::Key_9: if (selectedCell.y() < pow2(selectedLevel)-1) selectedCell = selectedCell.shiftY(1); break;
     }
-    cout << selectedCell.x << " " << selectedCell.y <<  " " << selectedCell.z << endl;
+    cout << selectedCell.x() << " " << selectedCell.y() <<  " " << selectedCell.z() << endl;
 
     updateGL();
 }
@@ -657,7 +617,7 @@ void ConturingWidget::createCellMesh() {
         array<Vector3f, 8> corners;
         for (int i = 0; i < 8; ++i) {
             Index corner = corner_delta[i];
-            corners[i] = (1.0/pow2(l))*Vector3f(corner.x, corner.y, corner.z);
+            corners[i] = (1.0/pow2(l))*Vector3f(corner.x(), corner.y(), corner.z());
         }
         // push cell edges
         for (int i = 0; i < 12; ++i) {
@@ -667,7 +627,7 @@ void ConturingWidget::createCellMesh() {
     }
     cells = unique_ptr<Model>(new Model(positions, GL_LINES, false));
     cells->setPosition(origin);
-    cells->scale = 2*cellGridRadius;
+    cells->scale = 2*voxelGridRadius;
 }
 
 void ConturingWidget::updateDMCMesh() {
@@ -701,7 +661,7 @@ void ConturingWidget::createDMCMesh() {
     DMC.createMesh(positions, indices);
     dmcModel = unique_ptr<Model>(new Model(positions, indices, false));
     dmcModel->setPosition(origin);
-    dmcModel->scale = 2*cellGridRadius;
+    dmcModel->scale = 2*voxelGridRadius;
     main->statusBar()->showMessage(("Done. "
                                    + to_string(positions.size()) + " Vertices, "
                                    + to_string(indices.size()/3) + " Triangles").c_str());
@@ -717,12 +677,15 @@ void ConturingWidget::compute() {
         return;
     }
     updateRenderStrategy();
-    int depth = QInputDialog::getInt(this, "Resolution", "Input the depth of the octree", MIN_OCTREE_DEPTH, MIN_OCTREE_DEPTH, max_depth);
+    bool ok = false;
+    int depth = QInputDialog::getInt(this, "Resolution", "Input the octree depth", MIN_OCTREE_DEPTH, MIN_OCTREE_DEPTH, max_depth, 1, &ok);
+    if (!ok)
+        return;
     res = pow2(depth);
     levels = depth+1;
 
-    cellGridRadius = voxelGridRadius-voxelGridRadius/(res+1);
-    origin = Vector3f(-cellGridRadius,-cellGridRadius,-cellGridRadius);
+    //cellGridRadius = voxelGridRadius-voxelGridRadius/(res+1);
+    origin = Vector3f(-voxelGridRadius,-voxelGridRadius,-voxelGridRadius);
     v_level_count = vector<uint>(levels, 0);
     cell_level_count = vector<uint>(levels, 0);
     createCellMesh();
@@ -730,20 +693,21 @@ void ConturingWidget::compute() {
 
     DMC.conturing(scene.get(), voxelGridRadius, res);
     createDMCMesh();
+    /*
     DMC.collapse(0.0f);
-/*
+
     aligned_vector3f positions, colors;
 
-    DMC->signSampler->inside(voxelGridRadius, positions);
+    DMC.signSampler->inside(voxelGridRadius, positions);
     inGridPoints = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
     positions.clear();
     colors.clear();
 
     std::cout << " get vertices " << std::endl;
-    DMC->vertices(positions, colors, v_offset, v_count);
+    DMC.vertices(positions, colors, v_offset, v_count);
     dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
     dmcVertices->setPosition(origin);
-    dmcVertices->scale = 2*cellGridRadius;
+    dmcVertices->scale = 2*voxelGridRadius;
     for (int i = 0; i < levels; ++i) {
         uint levelSize = pow2(i);
         for (uint x = 0; x < levelSize; ++x)
@@ -755,18 +719,18 @@ void ConturingWidget::compute() {
 
     positions.clear();
     colors.clear();
-    DMC->sampler->edgeIntersections(voxelGridRadius, positions, colors);
+    DMC.sampler->edgeIntersections(voxelGridRadius, positions, colors);
     edgeIntersections = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
 
     main->statusBar()->showMessage("generate vertex model...");
     std::cout << "generate vertex model..." << std::endl;
     positions.clear();
     colors.clear();
-    DMC->vertices(positions, colors, v_offset, v_count);
+    DMC.vertices(positions, colors, v_offset, v_count);
     dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
     dmcVertices->setPosition(origin);
-    dmcVertices->scale = 2*cellGridRadius;
-*/
+    dmcVertices->scale = 2*voxelGridRadius;
+    */
     resizeGL(w,h);
 }
 

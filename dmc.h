@@ -4722,7 +4722,17 @@ private:
     uint res, leaf_level;
     float voxelGridRadius, cell_size;
 // init octree
+    void contributingEdge(uint size, const Index& index, uint8_t level, Direction dir,
+                                             set<Intersection>& intersections, set<Index>& cells);
+
+    void contributingFace(uint size, const Index& index, uint8_t level, Direction dir,
+                                             set<Intersection>& intersections, set<Index>& cells);
+    void contributingCell(uint size, const Index& index, uint8_t level, set<Intersection>& intersections, set<Index>& cells);
+
+    void findContributing(set<Intersection>& intersections, set<Index>& cells);
+
     DMCOctreeCell* createOctreeNodes(uint size, const Index &index, uint8_t level);
+    //DMCOctreeCell* createOctreeNodes(uint size, const Index &index, uint8_t level)
 // init vertexTree
     void assignSurface(const vector<shared_ptr<VertexNode>> &vertices, int from, int to) const;
     void clusterIndices(array<DMCOctreeCell* , 4> nodes, Direction dir, Orientation orientation,
@@ -4763,7 +4773,7 @@ public:
     unique_ptr<SignSampler> signSampler;
     unique_ptr<HermiteDataSampler> sampler;
     unique_ptr<SurfaceComponentStrategy> componentStrategy;
-    DualMarchingCubes(float truncation = 0.05f)
+    DualMarchingCubes(float truncation = 0.1f)
         : scene(nullptr), componentStrategy(new MCStrategy(truncation)), res(0), voxelGridRadius(0.0f) {}
 
     bool conturing(RenderStrategy* scene, float voxelGridRadius, uint resolution);

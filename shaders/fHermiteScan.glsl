@@ -10,13 +10,16 @@ subroutine uniform vecFromView getVecFromView;
 
 struct Intersection {
     ivec4 e;
-    vec3 n;
-    float d;
+    uint d;
 };
 
-layout(std140, binding = 3) buffer data {
+coherent layout(std140, binding = 3) buffer data {
     Intersection cut[];
 };
+
+//coherent layout(std140, binding = 4) buffer sync {
+//     uint lock[];
+//};
 
 uniform int res;
 flat in vec3 n;
@@ -53,34 +56,38 @@ int contributes(ivec4 e){
 
     return -1;
 }
-/*
-int contributes(ivec4 e) {
-    for(int i = 0; i < cut.length(); i++) {
-        if (all(equal(e, cut[i].e))) {
-                return i;
-        }
-    }
-    return -1;
-}
-*/
+
 layout(index=0) subroutine (vecFromView) ivec4 vecFromXView(int x, int y, int z) {
-        return ivec4(z,y,x, gl_FrontFacing? 1 : -1);
+        return ivec4(z,y+1,x+1, gl_FrontFacing? 1 : -1);
 }
 
 layout(index=1) subroutine (vecFromView) ivec4 vecFromYView(int x, int y, int z) {
-        return ivec4(x,z,y,gl_FrontFacing? 2 : -2);
+        return ivec4(x+1,z,y+1,gl_FrontFacing? 2 : -2);
 }
 
 layout(index=2) subroutine (vecFromView) ivec4 vecFromZView(int x, int y, int z) {
-        return ivec4(res-x,y,z,gl_FrontFacing? 3 : -3);
+        return ivec4(res-x-1,y+1,z,gl_FrontFacing? 3 : -3);
+}
+
+uint code(float deviation, vec3 normal) {
+    uint d = uint(deviation*255+0.5); //+0.5 to round
+    uvec3 n = uvec3((normal+vec3(1))*0.5*255+vec3(0.5)); // [-1..1]^3 -> [0..255]^3
+    d = d << 24; // distance from grid point [0..1) -> [0..255] 1. byte
+    d += (n.x << 16); // 2. byte
+    d += (n.y << 8); // 3. byte
+    d += n.z; // 4. byte
+    return d;
 }
 
 void tryWrite(ivec4 edge, float deviation) {
     int index = contributes(edge);
     if (index >= 0) {
-        if (cut[index].d < 0.0 || (gl_FrontFacing && cut[index].d > deviation) || (!gl_FrontFacing && cut[index].d < deviation)) {
-            cut[index].d = deviation;
-            cut[index].n = normalize(n);
+        uint d = code(deviation, n);
+        if(gl_FrontFacing) {
+            if (atomicCompSwap(cut[index].d, 0, d) != 0) //just write if current = 0
+                atomicMin(cut[index].d, d); // current != 0
+        } else {
+            atomicMax(cut[index].d, d);
         }
     }
 }

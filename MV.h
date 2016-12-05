@@ -43,7 +43,7 @@ public:
 
 class DefaultRenderStrategy : public RenderStrategy, protected QOpenGLFunctions_4_3_Core {
 protected:
-    virtual void subroutineSelection(GLuint index[2]);
+    virtual GLuint subroutineSelection();
     virtual void doRender(QGLShaderProgram& program, const QMatrix4x4& projection, const QMatrix4x4& view) = 0;
 public:
     bool initShaders(QGLShaderProgram &programEdgeScan, QGLShaderProgram &programHermiteScan) const override;
@@ -78,7 +78,7 @@ private:
 public:
     RenderTrafoModelInstanced(const Model *model, const Trafo *trafo, int max_instances);
 protected:
-    virtual void subroutineSelection(GLuint index[2]);
+    virtual GLuint subroutineSelection();
     void doRender(QGLShaderProgram& program, const QMatrix4x4& projection, const QMatrix4x4& view) override;
 };
 
@@ -132,8 +132,8 @@ public slots:
     }
     void centerCamera() {
         if (showCells) {
-            Vector3f cell_center(selectedCell.x+0.5, selectedCell.y+0.5, selectedCell.z+0.5);
-            camera.center = origin+cell_center*2*cellGridRadius/pow2(selectedLevel);
+            Vector3f cell_center(selectedCell.x()+0.5, selectedCell.y()+0.5, selectedCell.z()+0.5);
+            camera.center = origin+cell_center*2*voxelGridRadius/pow2(selectedLevel);
             camera.position = camera.center - camera.forwd()*zoom;
         } else {
             camera.center.setZero(3);
@@ -143,7 +143,10 @@ public slots:
     }
     void toggleThinShelled() {
         thinShelled = !thinShelled;
-        DMC.componentStrategy = unique_ptr<SurfaceComponentStrategy>(new ThinShelledStrategy(DEFAULT_TRUNCATION));
+        if (thinShelled)
+            DMC.componentStrategy = unique_ptr<SurfaceComponentStrategy>(new ThinShelledStrategy(DEFAULT_TRUNCATION));
+        else
+            DMC.componentStrategy = unique_ptr<SurfaceComponentStrategy>(new MCStrategy(DEFAULT_TRUNCATION));
     }
     void toggleSparseTrajectory() {
         sparseTrajectory = !sparseTrajectory;
@@ -181,7 +184,7 @@ public:
     static const float MAX_ERROR_THRESHOLD;
     static const float DEFAULT_TRUNCATION;
     static const int MIN_OCTREE_DEPTH = 5;
-    static const int MAX_INSTANCES = 1000;
+    static const int MAX_INSTANCES = 100;
 
 
     ConturingWidget(CGMainWindow*,QWidget*);
@@ -254,7 +257,7 @@ private:
     vector_4_uint v_count;
     // the count of vertices in the VBO for each level
     vector<uint> v_level_count, cell_level_count;
-    float voxelGridRadius, cellGridRadius;
+    float voxelGridRadius;
 
     DualMarchingCubes DMC;
 

@@ -23,9 +23,9 @@ enum Orientation {
 };
 
 struct Index {
-    uint x, y, z;
-    Index(uint x, uint y, uint z) : x(x), y(y), z(z) {}
-    Index(uint xyz) : x(xyz), y(xyz), z(xyz) {}
+    uint v[3];
+    Index(uint x, uint y, uint z) {v[0] = x; v[1] = y; v[2] = z;}
+    Index(uint xyz) : Index(xyz, xyz, xyz) {}
     Index() : Index(0) {}
     Index operator +(const Index& index) const;
     Index operator -(const Index& index) const;
@@ -37,27 +37,24 @@ struct Index {
     inline bool operator >(uint xyz) const;
     bool operator == (const Index& rhs) const;
     bool operator != (const Index& rhs) const;
-    uint& operator [](uint orientation);
+    uint& operator [](uint dir);
     Index shiftX(int shift) const;
     Index shiftY(int shift) const;
     Index shiftZ(int shift) const;
-
+    Index shift(uint dir, int shift) const;
+    uint x() const {return v[0];}
+    uint y() const {return v[1];}
+    uint z() const {return v[2];}
 };
 
 inline bool operator <(const Index& lhs, const Index& rhs)
 {
-    if (lhs.z < rhs.z)
-        return true;
-    if (lhs.z > rhs.z)
-        return false;
-    if (lhs.y < rhs.y)
-        return true;
-    if (lhs.y > rhs.y)
-        return false;
-    if (lhs.x < rhs.x)
-        return true;
-    if (lhs.x > rhs.x)
-        return false;
+    for (int i = 2; i >= 0; --i) {
+        if (lhs.v[i] < rhs.v[i])
+            return true;
+        if (lhs.v[i] > rhs.v[i])
+            return false;
+    }
     return false;
 }
 
@@ -106,10 +103,38 @@ struct HermiteEdgeData {
     HermiteEdgeData(Vector3f& n, Vector3f p, uint e, Orientation orientation) : n(n), p(p), e(e), orientation(orientation) {}
 };
 
-// shift of child origin from parent origin
+// shift of child cell origin from parent cell origin
 const Index child_origin[8] = {
     Index(0,0,0), Index(1,0,0), Index(1,1,0), Index(0,1,0),
     Index(0,0,1), Index(1,0,1), Index(1,1,1), Index(0,1,1)
+};
+
+// shift of innder face origin from parent cell origin
+const Index cell_face_origin[3][4] = {
+    {Index(1,0,0), Index(1,0,1), Index(1,1,1), Index(1,1,0)},
+    {Index(0,1,0), Index(1,1,0), Index(1,1,1), Index(0,1,1)},
+    {Index(0,0,1), Index(0,1,1), Index(1,1,1), Index(1,0,1)}
+};
+
+// shift of inner edge origin from parent cell origin
+const Index cell_edge_origin[3][2] = {
+    {Index(0,1,1), Index(1,1,1)},
+    {Index(1,0,1), Index(1,1,1)},
+    {Index(1,1,0), Index(1,1,1)}
+};
+
+// shift of inner face origin from parent face origin
+const Index face_face_origin[3][4] = {
+    {Index(0,0,0), Index(0,0,1), Index(0,1,1), Index(0,1,0)},
+    {Index(0,0,0), Index(1,0,0), Index(1,0,1), Index(0,0,1)},
+    {Index(0,0,0), Index(0,1,0), Index(1,1,0), Index(1,0,0)}
+};
+
+// shift of inner edge origin from parent face origin
+const Index face_edge_origin[3][4] = {
+    {Index(0,0,1), Index(0,1,1), Index(0,1,0), Index(0,1,1)},
+    {Index(0,0,1), Index(1,0,1), Index(1,0,0), Index(1,0,1)},
+    {Index(0,1,0), Index(1,1,0), Index(1,0,0), Index(1,1,0)}
 };
 
 // shift of cell corner from cell origin
@@ -119,9 +144,9 @@ const Index corner_delta[8] = {
 };
 
 const Index cells_contain_edge_delta[3][4] = {
-    {Index(-1,0,0), Index(-1,-1,0), Index(0,-1,0), Index(0,0,0)},
-    {Index(-1,0,0), Index(-1,0,-1), Index(0,0,-1), Index(0,0,0)},
-    {Index(0,0,0), Index(0,-1,0), Index(-1,-1,0), Index(-1,0,0)}
+    {Index(1,0,0), Index(1,1,0), Index(0,1,0), Index(0,0,0)},
+    {Index(1,0,0), Index(1,0,1), Index(0,0,1), Index(0,0,0)},
+    {Index(0,0,0), Index(0,1,0), Index(1,1,0), Index(1,0,0)}
 };
 
 
@@ -235,14 +260,14 @@ class SignSampler : public GridSampler {
 public:
     set<Intersection> contributingIntersections;
     set<Index> contributingCells;
-
     SignSampler(uint res) : GridSampler(res) {}
 
     virtual bool sign(uint x, uint y, uint z) const = 0;
-    bool contributes(const Intersection& i) const;
-    bool contributes(const Index& node_origin) const;
+    virtual bool frontface_cut(uint dir, const Index &index) const = 0;
+    virtual bool backface_cut(uint dir, const Index &index) const = 0;
     bool sign(const Index& index) const;
     uint8_t signConfig(const Index& node_origin) const;
+    bool contributes(const Index& cell_origin) const;
 
     void inside(float voxelGridRadius, aligned_vector3f &positions);
     void outside(float voxelGridRadius, aligned_vector3f &positions);
