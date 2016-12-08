@@ -287,19 +287,16 @@ Vector3f Camera::forwd() const {
 }
 
 Vector3f Camera::upwd() const {
-    return rotation._transformVector(Y_AXIS);
+    return rotation.toRotationMatrix().transpose()*Y_AXIS;
 }
 
 Vector3f Camera::sidewd() const {
-    return rotation._transformVector(X_AXIS);
+    return rotation.toRotationMatrix().transpose()*X_AXIS;
 }
 
 Matrix4f Camera::getViewMatrix() const {
-    Matrix3f R = rotation.toRotationMatrix();
-    R.transposeInPlace();
-    Matrix4f M;
-    M.setIdentity();
-    M.block<3,3>(0,0) = R;
-    M.block<3,1>(0,3) = -R * position;
-    return M;
+    Affine3f view;
+    view.setIdentity();
+    view.translate(-zoom*Z_AXIS).rotate(rotation).translate(-center);
+    return view.matrix();
 }

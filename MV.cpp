@@ -320,8 +320,7 @@ void ConturingWidget::loadTrack() {
     double d = QInputDialog::getDouble(this, "Scale Factor", "How do you want to scale the track?", 1.0, 0.0001,numeric_limits<double>::max(),1,&ok);
     if (!ok) return;
 
-    if (trafo)// remove model for new track
-        model = nullptr;
+    removeTrack();
     main->statusBar()->showMessage ("Loading track ...");
 
     trafo = unique_ptr<Trafo>(new Trafo());
@@ -349,9 +348,7 @@ void ConturingWidget::loadModel() {
     if (filename.endsWith(".off"))
         LoadOffFile(filename.toLatin1(), positions, normals);
 
-    if (model)// remove track for new model
-        trafo = nullptr;
-    //LoadOffFile("D:/Sonstiges/Uni_Schule/CG_HIWI/MV/mv2/models/motor.off", positions, normals);
+
     model = unique_ptr<Model>(new Model(positions, normals, GL_TRIANGLES, true, 1.9f));
     if (trafo) {
         model->init(1.9f, *trafo);
@@ -406,11 +403,7 @@ void ConturingWidget::initializeGL() {
     initShaderProgram(program, ":/shaders/vshader.glsl", ":/shaders/fshader.glsl");
     initShaderProgram(programDebug, ":/shaders/vpoints.glsl", ":/shaders/fpoints.glsl");
 
-
-    camera.position = Z_AXIS;
-    rotX = rotY = 0;
-    zoom = 1.0f;
-
+    camera.zoom = 1.0f;
     voxelGridRadius = 1.0f;
 
     trafo_now = 0;
@@ -427,7 +420,7 @@ void ConturingWidget::initializeGL() {
     sparseTrajectory = false;
     selectedLevel = 0;
 
-    qglClearColor(Qt::black);
+    qglClearColor(Qt::white);
     glPointSize(4.0);
     glEnable(GL_DEPTH_TEST);
     glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &max_res);
@@ -524,8 +517,7 @@ void ConturingWidget::resizeGL(int width, int height) {
 
 void ConturingWidget::wheelEvent(QWheelEvent* event) {
     int delta = event->delta();
-    zoom *= (delta < 0)? CAMERA_SCROLL_FACTOR : 1/CAMERA_SCROLL_FACTOR;
-    camera.position = camera.rotation._transformVector(zoom*Z_AXIS) + camera.center;
+    camera.zoom *= (delta < 0)? CAMERA_SCROLL_FACTOR : 1/CAMERA_SCROLL_FACTOR;
     updateGL();
 }
 
@@ -570,20 +562,17 @@ void ConturingWidget::mouseMoveEvent(QMouseEvent* event) {
     int x = event->x();
     int y = event->y();
     if (button == Qt::LeftButton) {
-        rotX -= 0.5*(y-oldY)*M_PI/180.0;
-        rotY -= 0.5*(x-oldX)*M_PI/180.0;
-        Quaternionf qy(AngleAxisf(rotY, Vector3f(0,1,0)));
-        Quaternionf qx(AngleAxisf(rotX, Vector3f(1,0,0)));
+        Vector3f p1,p2;
+        trackballCoord(oldX,oldY,p1);
+        trackballCoord(x,y,p2);
 
-        camera.setRotation(qy * qx);
-        camera.position = camera.center - camera.forwd()*zoom;
+        Quaternionf q = trackball(p1,p2);
+        camera.rotate(q);
     }
 
     if (button == Qt::RightButton) {
         camera.center += camera.sidewd()*CAMERA_MOVEMENT_SPEED*(oldX-x);
         camera.center += camera.upwd()*CAMERA_MOVEMENT_SPEED*(y-oldY);
-        camera.translate(camera.sidewd()*CAMERA_MOVEMENT_SPEED*(oldX-x));
-        camera.translate(camera.upwd()*CAMERA_MOVEMENT_SPEED*(y-oldY));
     }
 
     oldX = x;
@@ -693,7 +682,7 @@ void ConturingWidget::compute() {
 
     DMC.conturing(scene.get(), voxelGridRadius, res);
     createDMCMesh();
-    /*
+/*
     DMC.collapse(0.0f);
 
     aligned_vector3f positions, colors;
@@ -721,6 +710,7 @@ void ConturingWidget::compute() {
     colors.clear();
     DMC.sampler->edgeIntersections(voxelGridRadius, positions, colors);
     edgeIntersections = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
+
 
     main->statusBar()->showMessage("generate vertex model...");
     std::cout << "generate vertex model..." << std::endl;

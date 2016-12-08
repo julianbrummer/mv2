@@ -98,6 +98,8 @@ public slots:
     void loadTrack();
     void removeTrack() {
         trafo = nullptr;
+        trafo_buffer = nullptr;
+        trafo_now = 0;
         if (model) {
             model->init(1.9f);
         }
@@ -131,14 +133,14 @@ public slots:
         updateGL();
     }
     void centerCamera() {
+
         if (showCells) {
             Vector3f cell_center(selectedCell.x()+0.5, selectedCell.y()+0.5, selectedCell.z()+0.5);
             camera.center = origin+cell_center*2*voxelGridRadius/pow2(selectedLevel);
-            camera.position = camera.center - camera.forwd()*zoom;
         } else {
             camera.center.setZero(3);
-            camera.position = -camera.forwd()*zoom;
         }
+
         updateGL();
     }
     void toggleThinShelled() {
@@ -214,7 +216,7 @@ public:
     qreal timestep;
     unique_ptr<Trafo> trafo;
     int trafo_now;
-    unique_ptr<SSBO> trafo_buffer, trafo_normal_buffer;
+    unique_ptr<SSBO> trafo_buffer;
 
 protected:
 
@@ -245,7 +247,6 @@ private:
 
     QGLShaderProgram program, programDebug;
     int w, h;
-    float rotX, rotY, zoom;
 
     Index selectedCell;
     int selectedLevel;
