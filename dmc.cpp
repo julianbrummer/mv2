@@ -3,6 +3,7 @@
 #include <queue>
 #include <stack>
 #include <algorithm>
+#include <chrono>
 
 QEF::QEF() {
     for (int i = 0; i < 6; ++i) {
@@ -52,6 +53,7 @@ SolutionSpace QEF::solve(const Vector3f &m, float truncation, Vector3d &c) {
          a[2], a[4], a[5];
     JacobiSVD<Matrix3Xd> svd(A, ComputeThinU | ComputeThinV); // U D V^T
     svd.setThreshold(truncation/svd.singularValues()[0]); // set singular values <= truncation to zero
+    //svd.setThreshold(0.005); // set singular values <= truncation to zero
                             // to avoid high values in diagonal matrix D^+
 
     // solve for c
@@ -364,11 +366,6 @@ void DualMarchingCubes::clusterBoundaryFace(DMCOctreeCell* node, Direction dir, 
 
 void DualMarchingCubes::clusterCell(const Index& cell_index, DMCOctreeCell* node) {
     if (node->hasChildren()) {
-        // cluster children cells first
-/*        for (uint i = 0; i < 8; ++i) {
-            Index child_index = cell_index+sampler->nodeSize(node->level+1)*child_origin[i];
-            clusterCell(child_index, node->child(i));
-        }*/
 
         // gather vertices from direct children
         vector<shared_ptr<VertexNode>> vertices;
@@ -670,7 +667,7 @@ void MapToQEFMinimum::generateVertex(const Index& cell_index, uint8_t level, uin
     Vector3d cell_origin(cell_index.x(),cell_index.y(), cell_index.z());
     cell_origin /= res;
     double cell_size = cellSize(level);
-    if (inCell(vQEF, cell_origin, cell_size, cell_size)) {
+    if (inCell(vQEF, cell_origin, cell_size, 1.0/res)) {
         v = vQEF.cast<float>();
     } else
         v = qef.m;
@@ -687,7 +684,7 @@ void SurfaceComponentStrategy::addToQEF(const Index& edge, Direction dir, float 
     qef.m += p;
 }
 
-void MCStrategy::initQEF(const int8_t edges[], uint count, DMCOctreeLeaf* leaf, const Index& cell_index, QEF& qef) const {
+void SurfaceComponentStrategy::initQEF(const int8_t edges[], uint count, DMCOctreeLeaf* leaf, const Index& cell_index, QEF& qef) const {
     uint cuts = 0;
     for (uint i = 0; i < count; ++i) {
         int e = edges[i];
@@ -704,8 +701,8 @@ void MCStrategy::initQEF(const int8_t edges[], uint count, DMCOctreeLeaf* leaf, 
             cuts++;
         }
     }
-    if (cuts == 0)
-        std::cout << "0 cuts" << std::endl;
+    /*if (cuts == 0)
+        cout << "0 cuts" << endl;*/
     qef.m /= cuts;
 }
 
@@ -735,6 +732,33 @@ void MCStrategy::createVertexNodes(DMCOctreeLeaf* leaf, const Index &leaf_index)
             if (edge == -2)
                 break;
         } else
+            vEdges[count++] = edge;
+    }
+}
+
+void DCStrategy::createVertexNodes(DMCOctreeLeaf* leaf, const Index &leaf_index) const {
+
+    uint vCount = vertexCount[leaf->signConfig];
+    if (vCount == 0)
+        return;
+    uint count = 0;
+    int8_t vEdges[12] = {-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1};
+    for (uint i = 0; i < 16; ++i) {
+        int edge = edgeTable[leaf->signConfig][i];
+        if (edge == -2) {
+            VertexNode* vNode = new VertexNode();
+            initQEF(vEdges, count, leaf, leaf_index, *(vNode->qef));
+            vertexStrategy->generateVertex(leaf_index, leaf->level, res, *(vNode->qef), vNode->v);
+            vNode->computeError();
+            vNode->collapsable = true; // a leaf node is always collapsable
+            // assign vertex index to edges
+            for (uint e = 0; e < count; ++e) {
+                leaf->frontEdgeVertices[vEdges[e]] = leaf->vertices.size();
+                leaf->backEdgeVertices[vEdges[e]] = leaf->vertices.size();
+            }
+            leaf->vertices.push_back(shared_ptr<VertexNode>(vNode));
+            break;
+        } else if (edge >= 0)
             vEdges[count++] = edge;
     }
 }
@@ -794,13 +818,88 @@ float ThinShelledStrategy::compRank(int comp[10], int size, HermiteData* frontCu
                 data = frontCuts[edge];
         }
         for (Vector3f* normal : normals)
-            deviation = std::min(deviation, (float) (normal->transpose()*data->n));
+            deviation = min(deviation, (float) (normal->transpose()*data->n));
 
         normals.push_back(&data->n);
     }
     return deviation;
 }
 
+void ThinShelledStrategy::createVertexNodes(DMCOctreeLeaf *leaf, const Index &leaf_index) const{
+    // gather edge data of this cell
+    HermiteData* frontCuts[12] = {nullptr};
+    HermiteData* backCuts[12] = {nullptr};
+    int cutCount = 0;
+    for (int e = 0; e < 12; ++e) {
+        Index edge = leaf_index + corner_delta[edge_corners[e][0]];
+        bool s0 = leaf->sign(edge_corners[e][0]);
+        bool s1 = leaf->sign(edge_corners[e][1]);
+        if (!s0 && s1) {
+            frontCuts[e] = sampler->edgeInfo(edge_dir[e], FRONT, edge);
+            cutCount++;
+        } else if (s0 && !s1) {
+            backCuts[e] = sampler->edgeInfo(edge_dir[e], BACK, edge);
+            cutCount++;
+        } else if (!s0 && !s1 && sampler->hasCut(edge_dir[e], FRONT, edge) && sampler->hasCut(edge_dir[e], BACK, edge)) {
+            frontCuts[e] = sampler->edgeInfo(edge_dir[e], FRONT, edge);
+            backCuts[e] = sampler->edgeInfo(edge_dir[e], BACK, edge);
+            cutCount += 2;
+        }
+    }
+    int comp[10] = {0};
+    int c = 0;
+
+    // compute edge configuration
+    int edgeConfig = 0;
+    for (int i = 0; i < 12; ++i) {
+        if (frontCuts[i] || backCuts[i]) {
+            edgeConfig |= 1 << i;
+        }
+    }
+        // iterate over all possible surface components for this edgeconfig
+        for (int i = 0; i < 32; ++i) {
+            int edge = compEdgeTable[edgeConfig][i];
+            if (edge == 0) { // no more components
+                break;
+            }
+            if (edge == -13) { // end of component
+                int e = comp[0];
+                if (e > 0 && !leaf->sign(edge_corners[e-1][0]) || e < 0 && !leaf->sign(edge_corners[-e-1][1])) {
+
+                    // create vertex node for the best surface component
+                    VertexNode* vNode = new VertexNode();
+                    initQEF(comp, c, frontCuts, backCuts, leaf_index, *(vNode->qef));
+                    vertexStrategy->generateVertex(leaf_index, sampler->leaf_level, res, *(vNode->qef), vNode->v);
+                    vNode->computeError();
+                    vNode->collapsable = true; // a leaf node is always collapsable
+
+                    // assign vertex index to edges
+                    int edge = 0;
+                    for (int i = 0; i < c; ++i) { // iterate over edge cuts of this component
+                        edge = comp[i];
+                        if (edge > 0) {
+                            edge -= 1;
+                            leaf->frontEdgeVertices[edge] = leaf->vertices.size();
+                            frontCuts[edge] = nullptr; // remove edge cut
+                        } else {
+                            edge = -edge-1;
+                            leaf->backEdgeVertices[edge] = leaf->vertices.size();
+                            backCuts[edge] = nullptr; // remove edge cut
+                        }
+                    }
+                    leaf->vertices.push_back(shared_ptr<VertexNode>(vNode));
+
+                }
+                c = 0;
+            } else { // add to current component
+                comp[c++] = edge;
+            }
+        }
+
+
+
+}
+/*
 void ThinShelledStrategy::createVertexNodes(DMCOctreeLeaf *leaf, const Index &leaf_index) const{
     // gather edge data of this cell
     HermiteData* frontCuts[12] = {nullptr};
@@ -847,7 +946,16 @@ void ThinShelledStrategy::createVertexNodes(DMCOctreeLeaf *leaf, const Index &le
             if (edge == -13) { // end of component
                 float rank = compRank(comp, c, frontCuts, backCuts);
                 // compare rank (normal deviation) of the component
-                if (rank > bestRank || (c == cutCount && bestRank-rank < eps_normal_dev)) {
+                if (c == cutCount) {
+                    int e = comp[0];
+                    if (e > 0 && !leaf->sign(edge_corners[e-1][0]) || e < 0 && !leaf->sign(edge_corners[-e-1][1])
+                            || bestRank-rank < eps_normal_dev) {
+                        copy(comp, comp+c, bestComp);
+                        bestSize = c;
+                        c = 0;
+                        break;
+                    }
+                } else if (rank > bestRank) {
                     copy(comp, comp+c, bestComp);
                     bestSize = c;
                     bestRank = rank;
@@ -883,7 +991,7 @@ void ThinShelledStrategy::createVertexNodes(DMCOctreeLeaf *leaf, const Index &le
         leaf->vertices.push_back(shared_ptr<VertexNode>(vNode));
     }
 }
-
+*/
 DMCOctreeCell* DualMarchingCubes::createOctreeNodes(uint size, const Index& index, uint8_t level) {
     uint child_size = size/2;
     if (level == leaf_level) {
@@ -931,11 +1039,21 @@ DMCOctreeCell* DualMarchingCubes::createOctreeNodes(uint size, const Index& inde
 }
 
 void DualMarchingCubes::collapse(float max_error) {
+    cout << "update collapsable Flag" << endl;
+    auto start = chrono::high_resolution_clock::now();
     updateCollapsableFlag(root.get(), max_error);
+    auto end = chrono::high_resolution_clock::now();
+    chrono::duration<double> diff = end-start;
+    cout << " " << diff.count() << "s" << endl;
 }
 
 void DualMarchingCubes::createMesh(aligned_vector3f& positions, vector<uint>& indices) {
+    cout << "create Mesh..." << endl;
+    auto start = chrono::high_resolution_clock::now();
     cellProc(root.get(), positions, indices);
+    auto end = chrono::high_resolution_clock::now();
+    chrono::duration<double> diff = end-start;
+    cout << " " << diff.count() << "s" << endl;
 }
 
 
@@ -1064,113 +1182,56 @@ bool DualMarchingCubes::conturing(RenderStrategy* scene, float voxelGridRadius, 
     this->cell_size = 2*voxelGridRadius/res;
     this->leaf_level = i_log2(res);
 
-    std::cout << "scan edge intersections (" << res << ")" << std::endl;
+    cout << "scan edge intersections (" << res << ")" << endl;
     CompressedEdgeScanner edgeScanner(res);
     edgeScanner.program = &programEdgeScan;
 
-    //shift near and far plane about a half voxel cell
-    //because rays are casted from the pixel center
     QMatrix4x4 projection;
     projection.ortho(-voxelGridRadius + 0.5*cell_size, voxelGridRadius - 0.5*cell_size,
                      -voxelGridRadius + 0.5*cell_size, voxelGridRadius - 0.5*cell_size,
                      -voxelGridRadius,
                      voxelGridRadius);
     edgeScanner.projection = projection;
+    auto start = chrono::high_resolution_clock::now();
     edgeScanner.scan(scene);
+    auto end = chrono::high_resolution_clock::now();
+    chrono::duration<double> diff = end-start;
+    cout << " " << diff.count() << "s" << endl;
 
-    std::cout << "create sign sampler (flood fill)" << std::endl;
-
+    cout << "create sign sampler (flood fill)" << endl;
+    start = chrono::high_resolution_clock::now();
     signSampler = unique_ptr<SignSampler>(new CompressedSignSampler(edgeScanner.data));
+    end = chrono::high_resolution_clock::now();
+    diff = end-start;
+    cout << " " << diff.count() << "s" << endl;
     edgeScanner.data = nullptr;
-/*
-    std::cout << "find contributing intersections ";
-    set<Intersection> intersections;
-    set<Index> cells;
-    findContributing(intersections, cells);
-    std::cout << intersections.size() << std::endl;
-*/
 
-
-    std::cout << "scan hermite data (" << resolution << ")" << std::endl;
+    cout << "scan hermite data (" << resolution << ")" << endl;
     HermiteScanner hermiteScanner(res, signSampler->contributingIntersections);
     hermiteScanner.program = &programHermiteScan;
     hermiteScanner.projection = projection;
+    start = chrono::high_resolution_clock::now();
     hermiteScanner.scan(scene);
+    end = chrono::high_resolution_clock::now();
+    diff = end-start;
+    cout << " " << diff.count() << "s" << endl;
 
     sampler = unique_ptr<HermiteDataSampler>(new SparseHermiteSampler(hermiteScanner.data));
     hermiteScanner.data = nullptr;
     componentStrategy->sampler = sampler.get();
     componentStrategy->res = res;
 
-    std::cout << "create octree (" << res << ")" << std::endl;
+    cout << "create octree (" << res << ")" << endl;
+    start = chrono::high_resolution_clock::now();
     DMCOctreeCell* node = createOctreeNodes(res, Index(0), 0);
     if (!node)
         node = new DMCHomogeneousCell(0, signSampler->sign(Index(0)));
     root = unique_ptr<DMCOctreeCell>(node);
-
-    //signSampler.reset();
-    //sampler.reset();
+    end = chrono::high_resolution_clock::now();
+    diff = end-start;
+    cout << " " << diff.count() << "s" << endl;
 
     return true;
-/*
-    CompressedHermiteScanner hermiteScanner(workResolution);
-    hermiteScanner.program = &programHermiteScan;
-    Index node_index(0,0,0);
-    projectionX(node_index, hermiteScanner.projection);
-    hermiteScanner.scan(scene, X);
-    projectionY(node_index, hermiteScanner.projection);
-    hermiteScanner.scan(scene, Y);
-    projectionZ(node_index, hermiteScanner.projection);
-    hermiteScanner.scan(scene, Z);
-    sampler = unique_ptr<HermiteDataSampler>(new CompressedHermiteSampler(hermiteScanner.data));
-*/
-/*
-    uint size = resolution +1;
-    float o = -voxelGridRadius+voxelGridRadius/size;
-    Vector3f origin(o,o,o);
-    float cellSize = 2*voxelGridRadius/size;
-
-
-    positions.clear();
-
-    for (uint x = 0; x < size; ++x) {
-         for (uint y = 0; y < size; ++y) {
-             for (uint z = 0; z < resolution; ++z) {
-
-
-                 positions.push_back(origin+cellSize*Vector3f(x,y,z));
-                 positions.push_back(origin+cellSize*Vector3f(x+1,y,z));
-
-                 positions.push_back(origin+cellSize*Vector3f(x,y,z));
-                 positions.push_back(origin+cellSize*Vector3f(x,y+1,z));
-
-                 positions.push_back(origin+cellSize*Vector3f(x,y,z));
-                 positions.push_back(origin+cellSize*Vector3f(x,y,z+1));
-
-                 if (edgeScanner.data->cut(0, x,y,z)) {
-                     colors.push_back(Color::GREEN);
-                     colors.push_back(Color::GREEN);
-                 } else {
-                     colors.push_back(Color::WHITE);
-                     colors.push_back(Color::WHITE);
-                 }
-                 if (edgeScanner.data->cut(1, x,y,z)) {
-                     colors.push_back(Color::GREEN);
-                     colors.push_back(Color::GREEN);
-                 } else {
-                     colors.push_back(Color::WHITE);
-                     colors.push_back(Color::WHITE);
-                 }
-                 if (edgeScanner.data->cut(2, x,y,z)) {
-                     colors.push_back(Color::GREEN);
-                     colors.push_back(Color::GREEN);
-                 } else {
-                     colors.push_back(Color::WHITE);
-                     colors.push_back(Color::WHITE);
-                 }
-             }
-         }
-     }*/
 }
 
 

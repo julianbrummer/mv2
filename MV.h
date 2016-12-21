@@ -143,15 +143,20 @@ public slots:
 
         updateGL();
     }
-    void toggleThinShelled() {
-        thinShelled = !thinShelled;
-        if (thinShelled)
-            DMC.componentStrategy = unique_ptr<SurfaceComponentStrategy>(new ThinShelledStrategy(DEFAULT_TRUNCATION));
-        else
-            DMC.componentStrategy = unique_ptr<SurfaceComponentStrategy>(new MCStrategy(DEFAULT_TRUNCATION));
+    void thinShelled() {
+        DMC.componentStrategy = unique_ptr<SurfaceComponentStrategy>(new ThinShelledStrategy(DEFAULT_TRUNCATION));
+    }
+    void dualContouring() {
+        DMC.componentStrategy = unique_ptr<SurfaceComponentStrategy>(new DCStrategy(DEFAULT_TRUNCATION));
+    }
+    void dmc() {
+        DMC.componentStrategy = unique_ptr<SurfaceComponentStrategy>(new MCStrategy(DEFAULT_TRUNCATION));
     }
     void toggleSparseTrajectory() {
         sparseTrajectory = !sparseTrajectory;
+    }
+    void toggleDebug() {
+        debug = !debug;
     }
     void trackForwardSlow() {
         shiftTrack(1);
@@ -186,6 +191,7 @@ public:
     static const float MAX_ERROR_THRESHOLD;
     static const float DEFAULT_TRUNCATION;
     static const int MIN_OCTREE_DEPTH = 5;
+    static const int DEBUG_MAX_OCTREE_DEPTH = 7;
     static const int MAX_INSTANCES = 100;
 
 
@@ -206,7 +212,7 @@ public:
 
     //bool wireframe;
     bool showModel, showEdgeIntesections, showInGridPoints, showOutGridPoints,
-         showOutModel, showDMCVertices, showCells, wireframe, thinShelled, sparseTrajectory;
+         showOutModel, showDMCVertices, showCells, wireframe, sparseTrajectory, debug;
 
     GLint max_res;
     uint res;

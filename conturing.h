@@ -144,7 +144,7 @@ const Index corner_delta[8] = {
 };
 
 const Index cells_contain_edge_delta[3][4] = {
-    {Index(1,0,0), Index(1,1,0), Index(0,1,0), Index(0,0,0)},
+    {Index(0,0,1), Index(0,1,1), Index(0,1,0), Index(0,0,0)},
     {Index(1,0,0), Index(1,0,1), Index(0,0,1), Index(0,0,0)},
     {Index(0,0,0), Index(0,1,0), Index(1,1,0), Index(1,0,0)}
 };

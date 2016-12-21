@@ -45,6 +45,7 @@ CGMainWindow::CGMainWindow (QWidget* parent)
 
     QMenu *view = new QMenu("&View",this);
     view->addAction ("Model", ogl, SLOT(toggleViewModel()), Qt::Key_M)->setCheckable(true);
+    view->actions()[0]->setChecked(true);
     view->addAction ("Edge Intersections", ogl, SLOT(toggleViewEdgeIntersections()), Qt::Key_E)->setCheckable(true);
     view->addAction ("Inner Grid", ogl, SLOT(toggleViewInGridPoints()), Qt::Key_I)->setCheckable(true);
     view->addAction ("Vertices", ogl, SLOT(toggleViewDMCVertices()), Qt::Key_V)->setCheckable(true);
@@ -69,8 +70,18 @@ CGMainWindow::CGMainWindow (QWidget* parent)
     menuBar()->addMenu(track);
 
     QMenu *sv = new QMenu("&SweptVolume",this);
+    QActionGroup* contouring = new QActionGroup(this);
+    sv->addAction ("Dual Marching Cubes", ogl, SLOT(dmc()), Qt::CTRL+Qt::ALT+Qt::Key_M)->setCheckable(true);
+    sv->addAction ("Dual Contouring", ogl, SLOT(dualContouring()), Qt::CTRL+Qt::ALT+Qt::Key_D)->setCheckable(true);
+    sv->addAction ("Thin Shelled", ogl, SLOT(thinShelled()), Qt::CTRL+Qt::ALT+Qt::Key_T)->setCheckable(true);
+    sv->actions()[0]->setChecked(true);
+    for (int i = 0; i < sv->actions().size(); ++i) {
+        sv->actions()[i]->setActionGroup(contouring);
+    }
+
     sv->addAction ("Sparse Trajectory", ogl, SLOT(toggleSparseTrajectory()), Qt::CTRL+Qt::ALT+Qt::Key_S)->setCheckable(true);
-    sv->addAction ("Thin Shelled", ogl, SLOT(toggleThinShelled()), Qt::CTRL+Qt::ALT+Qt::Key_T)->setCheckable(true);
+    sv->addAction ("Debug", ogl, SLOT(toggleDebug()), Qt::CTRL+Qt::ALT+Qt::Key_B)->setCheckable(true);
+
     sv->addAction ("Compute", ogl, SLOT(compute()), Qt::CTRL+Qt::Key_D);
     menuBar()->addMenu(sv);
 
@@ -294,7 +305,7 @@ const float ConturingWidget::CAMERA_MOVEMENT_SPEED = 0.0025f;
 const float ConturingWidget::CAMERA_SCROLL_FACTOR = 1.2f;
 const float ConturingWidget::MIN_ERROR_THRESHOLD = 0.0f;
 const float ConturingWidget::MAX_ERROR_THRESHOLD = 0.0001f;
-const float ConturingWidget::DEFAULT_TRUNCATION = 0.1f;
+const float ConturingWidget::DEFAULT_TRUNCATION = 0.05f;
 
 ConturingWidget::ConturingWidget (CGMainWindow *mainwindow,QWidget* parent ) : QGLWidget (parent) {
     main = mainwindow;
@@ -374,7 +385,7 @@ void ConturingWidget::updateRenderStrategy() {
             if (sparseTrajectory)
                 scene = unique_ptr<RenderStrategy>(new RenderSparseTrafoModel(model.get(), trafo.get(), MAX_INSTANCES));
             else
-                scene = unique_ptr<RenderStrategy>(new RenderTrafoModelInstanced(model.get(), trafo.get(), MAX_INSTANCES));
+                scene = unique_ptr<RenderStrategy>(new RenderTrafoModel(model.get(), trafo.get(), MAX_INSTANCES));
         } else
             scene = unique_ptr<RenderStrategy>(new RenderSingleModel(model.get()));
     }
@@ -408,7 +419,7 @@ void ConturingWidget::initializeGL() {
 
     trafo_now = 0;
 
-    showModel = false;
+    showModel = true;
     showOutModel = false;
     showEdgeIntesections = false;
     showInGridPoints = false;
@@ -416,8 +427,8 @@ void ConturingWidget::initializeGL() {
     showDMCVertices = false;
     showCells = false;
     wireframe = false;
-    thinShelled = false;
     sparseTrajectory = false;
+    debug = false;
     selectedLevel = 0;
 
     qglClearColor(Qt::white);
@@ -496,7 +507,7 @@ void ConturingWidget::paintGL() {
         Vector3f position((float)selectedCell.x()/levelSize, (float)selectedCell.y()/levelSize, (float)selectedCell.z()/levelSize);
         position *= 2*voxelGridRadius;
         cells->setPosition(origin+position);
-        bindDebugMesh(cells.get(), V, false);
+        bindDebugMesh(cells.get(), V, false, QVector4D(0.5,0.5,0.5,1));
         cells->render(programDebug, selectedLevel*CELL_EDGES_VERTEX_COUNT, CELL_EDGES_VERTEX_COUNT);
     }
 }
@@ -509,7 +520,7 @@ void ConturingWidget::resizeGL(int width, int height) {
         float ratio = w/(float) h;
         camera.perspective(45.0f,ratio,0.1f,100.0f);
     } else {
-        float ratio = h/(float) w;
+        float ratio = w/(float) h;
         camera.perspective(45.0f,ratio,0.1f,100.0f);
     }
     updateGL();
@@ -627,16 +638,21 @@ void ConturingWidget::updateDMCMesh() {
     main->statusBar()->showMessage(("simplify (t = " + to_string(errorThreshold) + ")...").c_str());
     cout << ("simplify (t = " + to_string(errorThreshold) + ")...") << endl;
     DMC.collapse(errorThreshold);
-/*
-    main->statusBar()->showMessage("generate vertex model...");
-    aligned_vector3f positions, colors;
-    v_offset.clear();
-    v_count.clear();
-    DMC->vertices(positions, colors, v_offset, v_count);
-    dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
-    dmcVertices->setPosition(origin);
-    dmcVertices->scale = 2*cellGridRadius;
-*/
+
+    if (debug) {
+        main->statusBar()->showMessage("create debug information...");
+        cout << "create debug information..." << endl;
+        aligned_vector3f positions, colors;
+        v_offset.clear();
+        v_count.clear();
+        DMC.vertices(positions, colors, v_offset, v_count);
+        dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
+        dmcVertices->setPosition(origin);
+        dmcVertices->scale = 2*voxelGridRadius;
+        main->statusBar()->showMessage("Done.");
+        cout << "Done." << endl;
+    }
+
     createDMCMesh();
     updateGL();
 
@@ -645,8 +661,8 @@ void ConturingWidget::updateDMCMesh() {
 void ConturingWidget::createDMCMesh() {
     positions.clear();
     indices.clear();
-    main->statusBar()->showMessage("create DMC Mesh...");
-    cout << "create DMC Mesh..." << endl;
+    main->statusBar()->showMessage("create Mesh...");
+
     DMC.createMesh(positions, indices);
     dmcModel = unique_ptr<Model>(new Model(positions, indices, false));
     dmcModel->setPosition(origin);
@@ -667,7 +683,7 @@ void ConturingWidget::compute() {
     }
     updateRenderStrategy();
     bool ok = false;
-    int depth = QInputDialog::getInt(this, "Resolution", "Input the octree depth", MIN_OCTREE_DEPTH, MIN_OCTREE_DEPTH, max_depth, 1, &ok);
+    int depth = QInputDialog::getInt(this, "Resolution", "Input the octree depth", MIN_OCTREE_DEPTH, MIN_OCTREE_DEPTH, debug? DEBUG_MAX_OCTREE_DEPTH : max_depth, 1, &ok);
     if (!ok)
         return;
     res = pow2(depth);
@@ -682,45 +698,47 @@ void ConturingWidget::compute() {
 
     DMC.conturing(scene.get(), voxelGridRadius, res);
     createDMCMesh();
-/*
     DMC.collapse(0.0f);
 
-    aligned_vector3f positions, colors;
+    if (debug) {
+        main->statusBar()->showMessage("create debug information...");
+        cout << "create debug information..." << endl;
+        aligned_vector3f positions, colors;
 
-    DMC.signSampler->inside(voxelGridRadius, positions);
-    inGridPoints = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
-    positions.clear();
-    colors.clear();
+        DMC.signSampler->inside(voxelGridRadius, positions);
+        inGridPoints = unique_ptr<Model>(new Model(positions, GL_POINTS, false));
+        positions.clear();
+        colors.clear();
 
-    std::cout << " get vertices " << std::endl;
-    DMC.vertices(positions, colors, v_offset, v_count);
-    dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
-    dmcVertices->setPosition(origin);
-    dmcVertices->scale = 2*voxelGridRadius;
-    for (int i = 0; i < levels; ++i) {
-        uint levelSize = pow2(i);
-        for (uint x = 0; x < levelSize; ++x)
-            for (uint y = 0; y < levelSize; ++y)
-                for (uint z = 0; z < levelSize; ++z)
-                    v_level_count[i] += v_count[i][x][y][z];
+        DMC.vertices(positions, colors, v_offset, v_count);
+        dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
+        dmcVertices->setPosition(origin);
+        dmcVertices->scale = 2*voxelGridRadius;
+        for (int i = 0; i < levels; ++i) {
+            uint levelSize = pow2(i);
+            for (uint x = 0; x < levelSize; ++x)
+                for (uint y = 0; y < levelSize; ++y)
+                    for (uint z = 0; z < levelSize; ++z)
+                        v_level_count[i] += v_count[i][x][y][z];
+        }
+
+        positions.clear();
+        colors.clear();
+        DMC.sampler->edgeIntersections(voxelGridRadius, positions, colors);
+        edgeIntersections = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
+
+        positions.clear();
+        colors.clear();
+        DMC.vertices(positions, colors, v_offset, v_count);
+        dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
+        dmcVertices->setPosition(origin);
+        dmcVertices->scale = 2*voxelGridRadius;
+        main->statusBar()->showMessage("Done.");
+        cout << "Done." << endl;
+    } else {
+        DMC.signSampler.reset();
+        DMC.sampler.reset();
     }
-
-
-    positions.clear();
-    colors.clear();
-    DMC.sampler->edgeIntersections(voxelGridRadius, positions, colors);
-    edgeIntersections = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
-
-
-    main->statusBar()->showMessage("generate vertex model...");
-    std::cout << "generate vertex model..." << std::endl;
-    positions.clear();
-    colors.clear();
-    DMC.vertices(positions, colors, v_offset, v_count);
-    dmcVertices = unique_ptr<Model>(new Model(positions, colors, false, GL_POINTS));
-    dmcVertices->setPosition(origin);
-    dmcVertices->scale = 2*voxelGridRadius;
-    */
     resizeGL(w,h);
 }
 

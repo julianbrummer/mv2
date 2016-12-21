@@ -4685,6 +4685,7 @@ public:
 class SurfaceComponentStrategy {
 protected:
     void addToQEF(const Index& edge, Direction orientation, float d, const Vector3f& n, QEF& qef) const;
+    void initQEF(const int8_t edges[], uint count, DMCOctreeLeaf* leaf, const Index& cell_index, QEF& qef) const;
 public:
     unique_ptr<VertexPlacementStrategy> vertexStrategy;
     HermiteDataSampler* sampler;
@@ -4695,10 +4696,14 @@ public:
 };
 
 class MCStrategy : public SurfaceComponentStrategy {
-private:
-    void initQEF(const int8_t edges[], uint count, DMCOctreeLeaf* leaf, const Index& cell_index, QEF& qef) const;
 public:
     MCStrategy(float truncation) : SurfaceComponentStrategy(truncation) {}
+    void createVertexNodes(DMCOctreeLeaf* leaf, const Index &leaf_index) const override;
+};
+
+class DCStrategy : public SurfaceComponentStrategy {
+public:
+    DCStrategy(float truncation) : SurfaceComponentStrategy(truncation) {}
     void createVertexNodes(DMCOctreeLeaf* leaf, const Index &leaf_index) const override;
 };
 
@@ -4710,7 +4715,7 @@ private:
     void initQEF(int comp[10], int size, HermiteData* frontCuts[12], HermiteData* backCuts[12],
                  const Index &leaf_index, QEF& qef) const;
 public:
-    ThinShelledStrategy(float truncation) : SurfaceComponentStrategy(truncation), eps_normal_dev(0.01f) {}
+    ThinShelledStrategy(float truncation) : SurfaceComponentStrategy(truncation), eps_normal_dev(0.2f) {}
     void createVertexNodes(DMCOctreeLeaf* leaf, const Index &leaf_index) const override;
 };
 
@@ -4773,7 +4778,7 @@ public:
     unique_ptr<SignSampler> signSampler;
     unique_ptr<HermiteDataSampler> sampler;
     unique_ptr<SurfaceComponentStrategy> componentStrategy;
-    DualMarchingCubes(float truncation = 0.1f)
+    DualMarchingCubes(float truncation = 0.05f)
         : scene(nullptr), componentStrategy(new MCStrategy(truncation)), res(0), voxelGridRadius(0.0f) {}
 
     bool conturing(RenderStrategy* scene, float voxelGridRadius, uint resolution);
